@@ -68,6 +68,12 @@
     .summary-count{background:#13243b;border-radius:8px;padding:8px 4px;text-align:center;font-size:11px}
     .summary-count strong{display:block;font-size:18px}
     .attendance-row{padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}
+    .category-filter{min-width:118px;max-width:160px;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;padding:7px 8px;min-height:36px;font-weight:700}
+    .color-picker-wrap{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .color-picker-wrap input[type=color]{width:58px;height:44px;padding:3px;border:1px solid var(--line);border-radius:9px;background:#071425;cursor:pointer}
+    .color-presets{display:flex;gap:7px;flex-wrap:wrap}
+    .color-preset{width:36px;height:36px;border-radius:9px;border:2px solid transparent;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+    .color-preset.selected{border-color:#fff;box-shadow:0 0 0 2px #2563eb}
     @media(min-width:761px){
       .app{width:min(1180px,100%);margin:auto;padding-left:10px;padding-right:10px}.brand h1{font-size:20px}.brand small{display:block;color:var(--muted)}
       .event .cats{font-size:10px}.event .kind{font-size:11px}.daynum{font-size:12px}.calendar{grid-template-rows:32px repeat(6,minmax(0,1fr))}
@@ -77,7 +83,13 @@
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
-  <section id="loginView" class="login">
+  <section id="bootView" class="login">
+    <div class="loginbox" style="text-align:center">
+      <h1>NINJA AIRS</h1>
+      <p>予定表を読み込んでいます…</p>
+    </div>
+  </section>
+  <section id="loginView" class="login hidden">
     <div class="loginbox">
       <h1>NINJA AIRS</h1><p>練習予定表・コーチ専用</p>
       <div class="field"><label for="apiUrl">Apps Script WebアプリURL</label><input id="apiUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec"></div>
@@ -91,7 +103,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ v4</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v4-line-player-priority</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ v4</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v5-monthly-only</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">予定表</button>
@@ -102,7 +114,18 @@
     <div class="toolbar">
       <div class="navs"><button id="prevBtn" class="btn">‹</button><button id="todayBtn" class="btn">今日</button></div>
       <h2 id="monthTitle">--</h2>
-      <button id="nextBtn" class="btn">›</button>
+      <div class="navs">
+        <select id="categoryFilter" class="category-filter" aria-label="表示カテゴリー">
+          <option value="ALL">全カテゴリー</option>
+          <option value="U13男子">男子U13</option>
+          <option value="U14男子">男子U14</option>
+          <option value="U15男子">男子U15</option>
+          <option value="U13女子">女子U13</option>
+          <option value="U14女子">女子U14</option>
+          <option value="U15女子">女子U15</option>
+        </select>
+        <button id="nextBtn" class="btn">›</button>
+      </div>
     </div>
     <div id="status" class="status"></div>
     <div class="calendar-wrap"><section id="calendar" class="calendar" aria-label="月間カレンダー"></section></div>
@@ -119,6 +142,13 @@
           <div class="field"><label>予定種類 *</label><select id="type"></select></div>
         </div>
         <div class="field"><label>対象カテゴリー *</label><div id="categoryChoices" class="category-box"></div></div>
+        <div class="field">
+          <label>予定の色 *</label>
+          <div class="color-picker-wrap">
+            <input id="eventColor" type="color" value="#2563eb" aria-label="予定の色">
+            <div id="colorPresets" class="color-presets"></div>
+          </div>
+        </div>
         <div class="field"><label>予定名</label><input id="title" placeholder="例：合同練習"></div>
         <div class="field"><label>会場</label><input id="location" placeholder="例：龍谷大学瀬田キャンパス体育館"></div>
         <label class="category-choice" style="width:max-content"><input id="allDay" type="checkbox">終日</label>
@@ -152,7 +182,15 @@
 <script>
 'use strict';
 
-const CATEGORIES=['U13男子','U14男子','U15男子','U13女子','U14女子','U15女子'];
+const CATEGORIES=[
+  {value:'U13男子',label:'男子U13'},
+  {value:'U14男子',label:'男子U14'},
+  {value:'U15男子',label:'男子U15'},
+  {value:'U13女子',label:'女子U13'},
+  {value:'U14女子',label:'女子U14'},
+  {value:'U15女子',label:'女子U15'}
+];
+const COLOR_PRESETS=['#2563eb','#dc2626','#16a34a','#eab308','#7c3aed','#ea580c','#0891b2','#db2777','#6b7280','#92400e'];
 const TYPES=[
   {name:'練習',color:'#2563eb'},
   {name:'試合',color:'#dc2626'},
@@ -176,11 +214,12 @@ const state={
   sourceUrl:'',
   currentEvent:null,
   selectedDate:'',
+  categoryFilter:'ALL',
   mode:'detail'
 };
 const $=id=>document.getElementById(id);
 const el={
-  loginView:$('loginView'),appView:$('appView'),apiUrl:$('apiUrl'),password:$('password'),
+  bootView:$('bootView'),loginView:$('loginView'),appView:$('appView'),apiUrl:$('apiUrl'),password:$('password'),
   loginBtn:$('loginBtn'),loginStatus:$('loginStatus'),calendar:$('calendar'),monthTitle:$('monthTitle'),
   status:$('status'),modal:$('modal'),detailView:$('detailView'),form:$('eventForm'),
   detailFoot:$('detailFoot'),editFoot:$('editFoot'),modalStatus:$('modalStatus')
@@ -210,6 +249,10 @@ function monthKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(
 function localDateKey(d=new Date()){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function todayKey(){return localDateKey(new Date())}
 function typeDef(name){return TYPES.find(x=>x.name===name)||TYPES[0]}
+function normalizeHexColor(value){
+  const color=String(value||'').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color)?color:'#2563eb';
+}
 function categoriesText(e){return (Array.isArray(e.categories)?e.categories:parseCategories(e.category)).join('/')}
 function parseCategories(v){if(Array.isArray(v))return v.filter(Boolean);return String(v||'').split(/[\/,、|]/).map(s=>s.trim()).filter(Boolean)}
 function setMode(mode){
@@ -224,7 +267,18 @@ function openModal(){el.modal.classList.add('open');el.modal.setAttribute('aria-
 function closeModal(){el.modal.classList.remove('open');el.modal.setAttribute('aria-hidden','true');state.currentEvent=null}
 function buildSelectors(){
   $('type').innerHTML=TYPES.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('');
-  $('categoryChoices').innerHTML=CATEGORIES.map(c=>`<label class="category-choice"><input type="checkbox" name="category" value="${esc(c)}">${esc(c)}</label>`).join('');
+  $('categoryChoices').innerHTML=CATEGORIES.map(c=>`<label class="category-choice"><input type="checkbox" name="category" value="${esc(c.value)}">${esc(c.label)}</label>`).join('');
+  $('colorPresets').innerHTML=COLOR_PRESETS.map(c=>`<button type="button" class="color-preset" data-color="${c}" style="background:${c}" aria-label="${c}"></button>`).join('');
+  $('colorPresets').querySelectorAll('[data-color]').forEach(btn=>btn.addEventListener('click',()=>{
+    $('eventColor').value=btn.dataset.color;
+    syncColorPreset();
+  }));
+  $('eventColor').addEventListener('input',syncColorPreset);
+  syncColorPreset();
+}
+function syncColorPreset(){
+  const color=String($('eventColor').value||'').toLowerCase();
+  document.querySelectorAll('[data-color]').forEach(btn=>btn.classList.toggle('selected',btn.dataset.color.toLowerCase()===color));
 }
 function selectedCategories(){return [...document.querySelectorAll('input[name=category]:checked')].map(x=>x.value)}
 function fillForm(e){
@@ -232,6 +286,8 @@ function fillForm(e){
   $('sourceRef').value=e?.sourceRef||'';
   $('date').value=e?.date||todayKey();
   $('type').value=e?.type||'練習';
+  $('eventColor').value=normalizeHexColor(e?.color)||typeDef(e?.type||'練習').color;
+  syncColorPreset();
   $('title').value=e?.title||'';
   $('location').value=e?.location||'';
   $('allDay').checked=!!e?.allDay;
@@ -356,6 +412,8 @@ async function initLineLogin(){
   try{
     state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');
     if(!state.apiUrl){
+      el.bootView.classList.add('hidden');
+      if(!lineLaunch)el.loginView.classList.remove('hidden');
       showStatus($('lineLoginStatus'),'Apps Script URLを設定してください。','error');
       return lineLaunch;
     }
@@ -363,6 +421,8 @@ async function initLineLogin(){
     const cfg=assertOk(await jsonp('publicConfig'));
     state.liffId=String(cfg.liffId||'').trim();
     if(!state.liffId){
+      el.bootView.classList.add('hidden');
+      if(!lineLaunch)el.loginView.classList.remove('hidden');
       showStatus($('lineLoginStatus'),'LINE_LIFF_IDが設定されていません。','error');
       return lineLaunch;
     }
@@ -385,6 +445,8 @@ async function initLineLogin(){
 
     // 通常ブラウザはコーチログイン画面として使用する。
     if(!lineLaunch){
+      el.bootView.classList.add('hidden');
+      el.loginView.classList.remove('hidden');
       showStatus($('lineLoginStatus'),'コーチはパスワードでログインしてください。');
       return false;
     }
@@ -401,12 +463,15 @@ async function initLineLogin(){
     await loadMonth(monthKey(new Date()));
     return true;
   }catch(e){
+    el.bootView.classList.add('hidden');
+    if(!lineLaunch)el.loginView.classList.remove('hidden');
     showStatus($('lineLoginStatus'),e.message,'error');
     // LINEからの起動では、エラー時もコーチログインへ切り替えない。
     return lineLaunch;
   }
 }
 function applyLogin(res){
+  el.bootView.classList.add('hidden');
   state.token=res.token;state.role=res.role||'coach';state.player=res.player||null;
   sessionStorage.setItem('scheduleToken',state.token);sessionStorage.setItem('scheduleRole',state.role);
   el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');
@@ -439,7 +504,7 @@ function renderCalendar(){
   for(let i=0;i<42;i++){
     const d=new Date(start);d.setDate(start.getDate()+i);
     const key=monthKey(d),date=localDateKey(d);
-    const events=state.events.filter(e=>e.date===date);
+    const events=state.events.filter(e=>e.date===date&&(state.categoryFilter==='ALL'||parseCategories(e.categories||e.category).includes(state.categoryFilter)));
     html+=`<div class="day ${key!==state.month?'out':''} ${date===todayKey()?'today':''} ${date===state.selectedDate?'selected':''}" data-date="${date}">
       <div class="dayhead"><span class="daynum">${d.getDate()}</span><button class="addmini" data-add="${date}" aria-label="予定追加">＋</button></div>
       ${events.slice(0,2).map(e=>`<button class="event" style="background:${esc(e.color||typeDef(e.type).color)}" data-id="${esc(e.scheduleId)}">
@@ -473,7 +538,7 @@ async function saveEvent(){
     if(!categories.length)throw new Error('カテゴリーを1つ以上選択してください。');
     const data={
       token:state.token,scheduleId:$('scheduleId').value,sourceRef:$('sourceRef').value,
-      date:$('date').value,type:$('type').value,categories:JSON.stringify(categories),
+      date:$('date').value,type:$('type').value,color:normalizeHexColor($('eventColor').value),categories:JSON.stringify(categories),
       title:$('title').value.trim(),location:$('location').value.trim(),
       allDay:$('allDay').checked,startTime:$('startTime').value,endTime:$('endTime').value,
       note:$('note').value.trim(),
@@ -607,8 +672,8 @@ async function deleteAttachment(id){
 function shiftMonth(diff){const [y,m]=state.month.split('-').map(Number);loadMonth(monthKey(new Date(y,m-1+diff,1)))}
 function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});state.token='';state.role='';state.player=null;sessionStorage.removeItem('scheduleToken');sessionStorage.removeItem('scheduleRole');el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');showStatus(el.loginStatus,'')}
 async function init(){
-  buildSelectors();state.selectedDate=todayKey();el.apiUrl.value=state.apiUrl;
-  el.loginBtn.onclick=login;$('newBtn').onclick=()=>newEvent();$('prevBtn').onclick=()=>shiftMonth(-1);$('nextBtn').onclick=()=>shiftMonth(1);$('todayBtn').onclick=()=>loadMonth(monthKey(new Date()));
+  buildSelectors();state.selectedDate=todayKey();state.categoryFilter='ALL';el.apiUrl.value=state.apiUrl;$('categoryFilter').value='ALL';
+  el.loginBtn.onclick=login;$('newBtn').onclick=()=>newEvent();$('categoryFilter').onchange=()=>{state.categoryFilter=$('categoryFilter').value||'ALL';renderCalendar()};$('prevBtn').onclick=()=>shiftMonth(-1);$('nextBtn').onclick=()=>shiftMonth(1);$('todayBtn').onclick=()=>loadMonth(monthKey(new Date()));
   $('sheetBtn').onclick=()=>{if(state.sourceUrl)window.open(state.sourceUrl,'_blank')};$('logoutBtn').onclick=()=>logout(true);
   $('closeBtn').onclick=closeModal;$('closeDetailBtn').onclick=closeModal;$('editBtn').onclick=editCurrent;$('copyBtn').onclick=copyCurrent;$('deleteBtn').onclick=deleteCurrent;
   $('cancelEditBtn').onclick=()=>state.currentEvent?renderDetail(state.currentEvent):closeModal();$('saveBtn').onclick=saveEvent;$('allDay').onchange=toggleTimes;
@@ -622,9 +687,15 @@ async function init(){
     await loadMonth(monthKey(new Date()));
   }
 
+  if('caches' in window){
+    try{
+      const keys=await caches.keys();
+      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v5').map(k=>caches.delete(k)));
+    }catch(e){}
+  }
   if('serviceWorker' in navigator){
     try{
-      const reg=await navigator.serviceWorker.register('./sw.js?v=4');
+      const reg=await navigator.serviceWorker.register('./sw.js?v=5.0.0');
       reg.update().catch(()=>{});
     }catch(e){}
   }
