@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <meta name="theme-color" content="#07111f">
-  <title>NINJA AIRS 練習予定表 コーチ版</title>
+  <title>NINJA AIRS 練習予定表 コーチ専用</title>
   <link rel="manifest" href="manifest.json">
   <style>
     :root{
@@ -80,6 +80,7 @@
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
+  <script src="./config.js?v=6.0.0"></script>
 </head>
 <body>
   <section id="loginView" class="login">
@@ -96,7 +97,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ v4</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v5-coach-monthly-only</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ コーチ専用</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v6-coach-only</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">予定表</button>
@@ -198,7 +199,7 @@ const TYPES=[
 ];
 
 const state={
-  apiUrl:localStorage.getItem('scheduleApiUrl')||'',
+  apiUrl:(window.NINJA_SCHEDULE_CONFIG&&window.NINJA_SCHEDULE_CONFIG.API_URL)||localStorage.getItem('scheduleApiUrl')||'',
   token:sessionStorage.getItem('scheduleToken')||'',
   role:sessionStorage.getItem('scheduleRole')||'',
   player:null,liffId:'',
@@ -220,7 +221,7 @@ const el={
 
 function jsonp(action,params={}){
   return new Promise((resolve,reject)=>{
-    if(!state.apiUrl)return reject(new Error('Apps Script URLを入力してください。'));
+    if(!state.apiUrl||state.apiUrl.indexOf('ここにApps Script')===0)return reject(new Error('Apps Script URLを入力してください。'));
     const cb='cb_'+Date.now()+'_'+Math.random().toString(36).slice(2);
     const script=document.createElement('script');
     const timer=setTimeout(()=>finish(new Error('通信がタイムアウトしました。')),25000);
@@ -622,12 +623,12 @@ async function init(){
   if('caches' in window){
     try{
       const keys=await caches.keys();
-      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v5').map(k=>caches.delete(k)));
+      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v6').map(k=>caches.delete(k)));
     }catch(e){}
   }
   if('serviceWorker' in navigator){
     try{
-      const reg=await navigator.serviceWorker.register('./sw.js?v=5.0.0');
+      const reg=await navigator.serviceWorker.register('./sw.js?v=6.0.0');
       reg.update().catch(()=>{});
     }catch(e){}
   }

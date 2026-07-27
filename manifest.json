@@ -1,10 +1,17 @@
 {
-  "name": "NINJA AIRS 予定・出欠管理",
-  "short_name": "NINJA予定",
-  "start_url": "./",
-  "scope": "./",
+  "name": "NINJA AIRS 練習予定表",
+  "short_name": "NINJA予定表",
+  "start_url": "./index.html?v=6",
   "display": "standalone",
-  "background_color": "#07111f",
-  "theme_color": "#07111f",
-  "lang": "ja"
+  "background_color": "#07101f",
+  "theme_color": "#0b1220",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "scope": "./"
 }

@@ -80,6 +80,7 @@
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
+  <script src="./config.js?v=6.0.0"></script>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
@@ -197,7 +198,7 @@ const TYPES=[
 ];
 
 const state={
-  apiUrl:localStorage.getItem('scheduleApiUrl')||'',
+  apiUrl:(window.NINJA_SCHEDULE_CONFIG&&window.NINJA_SCHEDULE_CONFIG.API_URL)||localStorage.getItem('scheduleApiUrl')||'',
   token:sessionStorage.getItem('scheduleToken')||'',
   role:sessionStorage.getItem('scheduleRole')||'',
   player:null,liffId:'',
@@ -219,7 +220,7 @@ const el={
 
 function jsonp(action,params={}){
   return new Promise((resolve,reject)=>{
-    if(!state.apiUrl)return reject(new Error('Apps Script URLを入力してください。'));
+    if(!state.apiUrl||state.apiUrl.indexOf('ここにApps Script')===0)return reject(new Error('Apps Script URLを入力してください。'));
     const cb='cb_'+Date.now()+'_'+Math.random().toString(36).slice(2);
     const script=document.createElement('script');
     const timer=setTimeout(()=>finish(new Error('通信がタイムアウトしました。')),25000);
@@ -396,7 +397,7 @@ function formatBytes(n){n=Number(n)||0;if(n<1024)return n+'B';if(n<1048576)retur
 async function initPlayerLogin(){
   try{
     state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');
-    if(!state.apiUrl)throw new Error('Apps Script URLが設定されていません。管理者へ連絡してください。');
+    if(!state.apiUrl||state.apiUrl.indexOf('ここにApps Script')===0)throw new Error('Apps Script URLが設定されていません。管理者へ連絡してください。');
 
     sessionStorage.removeItem('scheduleToken');
     sessionStorage.removeItem('scheduleRole');
