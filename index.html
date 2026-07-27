@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <meta name="theme-color" content="#07111f">
-  <title>NINJA AIRS 練習予定表</title>
+  <title>NINJA AIRS 練習予定表 v4</title>
   <link rel="manifest" href="manifest.json">
   <style>
     :root{
@@ -57,12 +57,24 @@
     .attachment-thumb{width:48px;height:48px;border-radius:7px;object-fit:cover;background:#13243b}.attachment-info{min-width:0;flex:1}.attachment-name{font-size:12px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.attachment-meta{font-size:10px;color:var(--muted)}
     .attachment a{color:#93c5fd;text-decoration:none;font-size:12px;font-weight:800}.upload-row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.upload-row input[type=file]{max-width:100%;font-size:12px}
     .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:100;background:#020617;color:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 14px;box-shadow:var(--shadow);display:none}.toast.show{display:block}
+
+    .role-badge{font-size:11px;color:#bfdbfe;white-space:nowrap}.build-badge{font-size:10px;color:#94a3b8;margin-top:2px}
+    .attendance-card{margin-top:14px;border:1px solid var(--line);background:#09182a;border-radius:12px;padding:12px}
+    .attendance-card h4{margin:0 0 8px;font-size:15px}
+    .attendance-buttons{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+    .attendance-buttons button.selected{outline:2px solid #fff}
+    .attendance-reason{margin-top:10px}
+    .summary-counts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+    .summary-count{background:#13243b;border-radius:8px;padding:8px 4px;text-align:center;font-size:11px}
+    .summary-count strong{display:block;font-size:18px}
+    .attendance-row{padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}
     @media(min-width:761px){
       .app{width:min(1180px,100%);margin:auto;padding-left:10px;padding-right:10px}.brand h1{font-size:20px}.brand small{display:block;color:var(--muted)}
       .event .cats{font-size:10px}.event .kind{font-size:11px}.daynum{font-size:12px}.calendar{grid-template-rows:32px repeat(6,minmax(0,1fr))}
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
   <section id="loginView" class="login">
@@ -71,6 +83,7 @@
       <div class="field"><label for="apiUrl">Apps Script WebアプリURL</label><input id="apiUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec"></div>
       <div class="field"><label for="password">パスワード</label><input id="password" type="password" inputmode="numeric" autocomplete="current-password"></div>
       <button id="loginBtn" class="btn primary" style="width:100%">ログイン</button>
+      <div id="lineLoginStatus" class="status">LINE認証を確認しています…</div>
       <div id="loginStatus" class="status"></div>
     </div>
   </section>
@@ -78,7 +91,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>独立カレンダーアプリ</small></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ v4</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v4-line-player-priority</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">予定表</button>
@@ -111,6 +124,13 @@
         <label class="category-choice" style="width:max-content"><input id="allDay" type="checkbox">終日</label>
         <div id="timeFields" class="grid2"><div class="field"><label>開始</label><input id="startTime" type="time"></div><div class="field"><label>終了</label><input id="endTime" type="time"></div></div>
         <div class="field"><label>詳細</label><textarea id="note" placeholder="集合時間、持ち物、対戦相手、連絡事項など"></textarea></div>
+        <div class="attendance-card">
+          <label class="category-choice" style="width:max-content"><input id="attendanceEnabled" type="checkbox">出欠回答を必須にする</label>
+          <div id="deadlineFields" class="grid2 hidden">
+            <div class="field"><label>回答期限（予定日の何日前）</label><input id="deadlineDays" type="number" min="0" max="60" value="2"></div>
+            <div class="field"><label>締切時刻</label><input id="deadlineTime" type="time" value="21:00"></div>
+          </div>
+        </div>
         <div id="modalStatus" class="status"></div>
       </form>
       <div id="detailFoot" class="dialogfoot">
@@ -149,6 +169,8 @@ const TYPES=[
 const state={
   apiUrl:localStorage.getItem('scheduleApiUrl')||'',
   token:sessionStorage.getItem('scheduleToken')||'',
+  role:sessionStorage.getItem('scheduleRole')||'',
+  player:null,liffId:'',
   month:'',
   events:[],
   sourceUrl:'',
@@ -216,6 +238,10 @@ function fillForm(e){
   $('startTime').value=e?.startTime||'';
   $('endTime').value=e?.endTime||'';
   $('note').value=e?.note||'';
+  $('attendanceEnabled').checked=!!e?.attendanceEnabled;
+  $('deadlineDays').value=Number.isFinite(Number(e?.deadlineDays))?Number(e.deadlineDays):2;
+  $('deadlineTime').value=e?.deadlineTime||'21:00';
+  toggleDeadline();
   const cats=new Set(e?.categories||parseCategories(e?.category));
   document.querySelectorAll('input[name=category]').forEach(x=>x.checked=cats.has(x.value));
   toggleTimes();
@@ -236,37 +262,164 @@ function renderDetail(e){
       <dt>会場</dt><dd>${esc(e.location||'')}</dd>
       <dt>詳細</dt><dd>${esc(e.note||'')}</dd>
     </dl>
+    <div id="attendancePanel">${renderAttendancePanel(e)}</div>
     <div class="field" style="margin-top:18px">
       <label>写真・ファイル添付</label>
-      <div class="upload-row">
+      <div class="upload-row" id="uploadRow">
         <input id="attachmentInput" type="file" accept="image/jpeg,image/png,application/pdf,.doc,.docx,.xls,.xlsx">
         <button id="uploadBtn" type="button" class="btn primary">添付</button>
       </div>
       <div id="uploadStatus" class="status"></div>
       <div id="attachmentList" class="attachment-list">${renderAttachments(attachments)}</div>
     </div>`;
+  bindAttendancePanel(e);
+  if(state.role==='player') $('uploadRow').classList.add('hidden');
   $('uploadBtn').addEventListener('click',uploadAttachment);
   el.detailView.querySelectorAll('[data-open-attachment]').forEach(btn=>btn.addEventListener('click',()=>openAttachment(btn.dataset.openAttachment)));
   el.detailView.querySelectorAll('[data-delete-attachment]').forEach(btn=>btn.addEventListener('click',()=>deleteAttachment(btn.dataset.deleteAttachment)));
-  setMode('detail');openModal();
+  setMode('detail');
+  el.detailFoot.querySelector('#editBtn').classList.toggle('hidden',state.role!=='coach');
+  el.detailFoot.querySelector('#copyBtn').classList.toggle('hidden',state.role!=='coach');
+  el.detailFoot.querySelector('#deleteBtn').classList.toggle('hidden',state.role!=='coach');
+  openModal();
 }
 function renderAttachments(items){
   if(!items.length)return '<div class="status">添付はありません。</div>';
   return items.map(a=>{
     const isImg=String(a.mimeType||'').startsWith('image/');
     const thumb=isImg?`<div class="attachment-thumb" style="display:grid;place-items:center">画像</div>`:`<div class="attachment-thumb" style="display:grid;place-items:center">FILE</div>`;
-    return `<div class="attachment">${thumb}<div class="attachment-info"><div class="attachment-name">${esc(a.fileName)}</div><div class="attachment-meta">${esc(a.mimeType||'')} / ${formatBytes(a.size||0)}</div></div><button class="btn" style="padding:5px 7px;min-height:30px" data-open-attachment="${esc(a.attachmentId)}">見る</button><button class="btn danger" style="padding:5px 7px;min-height:30px" data-delete-attachment="${esc(a.attachmentId)}">削除</button></div>`;
+    return `<div class="attachment">${thumb}<div class="attachment-info"><div class="attachment-name">${esc(a.fileName)}</div><div class="attachment-meta">${esc(a.mimeType||'')} / ${formatBytes(a.size||0)}</div></div><button class="btn" style="padding:5px 7px;min-height:30px" data-open-attachment="${esc(a.attachmentId)}">見る</button>${state.role==='coach'?`<button class="btn danger" style="padding:5px 7px;min-height:30px" data-delete-attachment="${esc(a.attachmentId)}">削除</button>`:''}</div>`;
   }).join('');
 }
+
+function renderAttendancePanel(e){
+  if(!e.attendanceEnabled)return state.role==='coach'?'<div class="attendance-card"><h4>出欠回答</h4><div class="status">この予定では出欠を取りません。</div></div>':'';
+  const deadline=e.deadlineAt||'';
+  if(state.role==='player'){
+    const a=e.myAttendance||{};
+    return `<div class="attendance-card"><h4>出欠回答（必須）</h4><div class="status">回答期限：${esc(deadline||'設定なし')}</div>
+      <div class="attendance-buttons">
+        ${['出席','遅刻','欠席'].map(s=>`<button type="button" class="btn ${a.status===s?'selected':''}" data-att-status="${s}">${s}</button>`).join('')}
+      </div>
+      <div id="attendanceExtra" class="attendance-reason"></div>
+      <div id="attendanceStatus" class="status">${a.status?'現在の回答：'+esc(a.status):'まだ回答していません。'}</div>
+    </div>`;
+  }
+  return `<div class="attendance-card"><h4>出欠状況</h4><div class="status">回答期限：${esc(deadline||'設定なし')}</div><div id="attendanceSummary" class="status">読み込み中…</div></div>`;
+}
+function bindAttendancePanel(e){
+  if(!e.attendanceEnabled)return;
+  if(state.role==='player'){
+    document.querySelectorAll('[data-att-status]').forEach(b=>b.addEventListener('click',()=>showAttendanceForm(b.dataset.attStatus,e.myAttendance||{})));
+  }else loadAttendanceSummary(e.scheduleId);
+}
+function showAttendanceForm(status,current={}){
+  document.querySelectorAll('[data-att-status]').forEach(b=>b.classList.toggle('selected',b.dataset.attStatus===status));
+  const box=$('attendanceExtra');
+  if(status==='出席'){
+    box.innerHTML=`<button type="button" id="saveAttendanceBtn" class="btn primary" style="width:100%">出席で登録</button>`;
+  }else if(status==='遅刻'){
+    box.innerHTML=`<div class="field"><label>到着予定時刻 *</label><input id="arrivalTime" type="time" value="${esc(current.arrivalTime||'')}"></div><div class="field"><label>遅刻理由 *</label><textarea id="attendanceReason"></textarea></div><button type="button" id="saveAttendanceBtn" class="btn primary" style="width:100%">遅刻で登録</button>`;
+  }else{
+    box.innerHTML=`<div class="field"><label>欠席理由 *</label><textarea id="attendanceReason"></textarea></div><button type="button" id="saveAttendanceBtn" class="btn primary" style="width:100%">欠席で登録</button>`;
+  }
+  $('saveAttendanceBtn').onclick=()=>saveAttendance(status);
+}
+async function saveAttendance(status){
+  try{
+    const arrival=$('arrivalTime')?.value||'',reason=$('attendanceReason')?.value.trim()||'';
+    const res=assertOk(await jsonp('saveAttendance',{token:state.token,scheduleId:state.currentEvent.scheduleId,status,arrivalTime:arrival,reason}));
+    state.currentEvent.myAttendance=res.attendance;toast('出欠を登録しました。');
+    renderDetail(state.currentEvent);
+  }catch(e){showStatus($('attendanceStatus'),e.message,'error')}
+}
+async function loadAttendanceSummary(scheduleId){
+  try{
+    const res=assertOk(await jsonp('attendanceSummary',{token:state.token,scheduleId}));
+    const c=res.counts||{},rows=res.rows||[];
+    $('attendanceSummary').innerHTML=`<div class="summary-counts">${['出席','遅刻','欠席','未回答'].map(s=>`<div class="summary-count"><strong>${c[s]||0}</strong>${s}</div>`).join('')}</div>
+      <div style="margin-top:10px">${rows.map(r=>`<div class="attendance-row"><strong>${esc(r.playerName)}</strong>　${esc(r.status)}${r.arrivalTime?'（'+esc(r.arrivalTime)+'）':''}${r.reason?'<br>'+esc(r.reason):''}</div>`).join('')||'<div class="status">対象選手がいません。</div>'}</div>`;
+  }catch(e){showStatus($('attendanceSummary'),e.message,'error')}
+}
+function toggleDeadline(){$('deadlineFields').classList.toggle('hidden',!$('attendanceEnabled').checked)}
+
 function formatBytes(n){n=Number(n)||0;if(n<1024)return n+'B';if(n<1048576)return (n/1024).toFixed(1)+'KB';return (n/1048576).toFixed(1)+'MB'}
 
+function isLineLaunch(){
+  const ua=navigator.userAgent||'';
+  const params=new URLSearchParams(location.search);
+  return /\bLine\//i.test(ua)||/\bLIFF\b/i.test(ua)||params.has('liff.state')||params.get('mode')==='player'||/^https:\/\/liff\.line\.me\//i.test(document.referrer||'');
+}
+
+async function initLineLogin(){
+  const lineLaunch=isLineLaunch();
+  try{
+    state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');
+    if(!state.apiUrl){
+      showStatus($('lineLoginStatus'),'Apps Script URLを設定してください。','error');
+      return lineLaunch;
+    }
+
+    const cfg=assertOk(await jsonp('publicConfig'));
+    state.liffId=String(cfg.liffId||'').trim();
+    if(!state.liffId){
+      showStatus($('lineLoginStatus'),'LINE_LIFF_IDが設定されていません。','error');
+      return lineLaunch;
+    }
+    if(/^https?:\/\//i.test(state.liffId)){
+      throw new Error('LINE_LIFF_IDにはURLではなく「2010789200-Iyp3vKNa」の形式で設定してください。');
+    }
+
+    // LIFFから起動した場合、以前のコーチセッションは絶対に復元しない。
+    if(lineLaunch){
+      sessionStorage.removeItem('scheduleToken');
+      sessionStorage.removeItem('scheduleRole');
+      state.token='';state.role='';state.player=null;
+      el.password.value='';
+      el.loginBtn.classList.add('hidden');
+      el.password.closest('.field').classList.add('hidden');
+      showStatus($('lineLoginStatus'),'LINE選手認証を確認しています…');
+    }
+
+    await liff.init({liffId:state.liffId,withLoginOnExternalBrowser:true});
+
+    // 通常ブラウザはコーチログイン画面として使用する。
+    if(!lineLaunch){
+      showStatus($('lineLoginStatus'),'コーチはパスワードでログインしてください。');
+      return false;
+    }
+
+    if(!liff.isLoggedIn()){
+      liff.login({redirectUri:location.origin+location.pathname+'?mode=player'});
+      return true;
+    }
+
+    const idToken=liff.getIDToken();
+    if(!idToken)throw new Error('LINE認証情報を取得できません。LIFFのScopeでopenidを有効にしてください。');
+    const res=assertOk(await jsonp('lineLogin',{idToken}));
+    applyLogin(res);
+    await loadMonth(monthKey(new Date()));
+    return true;
+  }catch(e){
+    showStatus($('lineLoginStatus'),e.message,'error');
+    // LINEからの起動では、エラー時もコーチログインへ切り替えない。
+    return lineLaunch;
+  }
+}
+function applyLogin(res){
+  state.token=res.token;state.role=res.role||'coach';state.player=res.player||null;
+  sessionStorage.setItem('scheduleToken',state.token);sessionStorage.setItem('scheduleRole',state.role);
+  el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');
+  $('newBtn').classList.toggle('hidden',state.role!=='coach');
+  $('sheetBtn').classList.toggle('hidden',state.role!=='coach');
+  $('roleBadge').textContent=state.role==='player'?(state.player?.playerName||'選手')+' / '+(state.player?.category||''):'コーチ';
+}
 async function login(){
   try{
     showStatus(el.loginStatus,'接続中…');
     state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');localStorage.setItem('scheduleApiUrl',state.apiUrl);
     const res=assertOk(await jsonp('login',{password:el.password.value}));
-    state.token=res.token;sessionStorage.setItem('scheduleToken',state.token);
-    el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');
+    applyLogin(res);
     await loadMonth(monthKey(new Date()));
   }catch(e){showStatus(el.loginStatus,e.message,'error')}
 }
@@ -300,7 +453,13 @@ function renderCalendar(){
     el.calendar.querySelectorAll('.day').forEach(x=>x.classList.toggle('selected',x.dataset.date===state.selectedDate));
   }));
   el.calendar.querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',ev=>{ev.stopPropagation();state.selectedDate=b.dataset.add;renderCalendar();newEvent(b.dataset.add)}));
-  el.calendar.querySelectorAll('[data-id]').forEach(b=>b.addEventListener('click',ev=>{ev.stopPropagation();const e=state.events.find(x=>x.scheduleId===b.dataset.id);if(e){state.selectedDate=e.date;renderCalendar();renderDetail(e)}}));
+  el.calendar.querySelectorAll('[data-id]').forEach(b=>b.addEventListener('click',async ev=>{ev.stopPropagation();await openEvent(b.dataset.id)}));
+}
+async function openEvent(scheduleId){
+  try{
+    const res=assertOk(await jsonp('event',{token:state.token,scheduleId}));
+    const e=res.event;state.selectedDate=e.date;renderCalendar();renderDetail(e);
+  }catch(err){toast(err.message)}
 }
 function newEvent(date=todayKey()){
   state.currentEvent=null;$('modalTitle').textContent='予定追加';fillForm({date,type:'練習',categories:[]});showStatus(el.modalStatus,'');setMode('edit');openModal()
@@ -317,7 +476,10 @@ async function saveEvent(){
       date:$('date').value,type:$('type').value,categories:JSON.stringify(categories),
       title:$('title').value.trim(),location:$('location').value.trim(),
       allDay:$('allDay').checked,startTime:$('startTime').value,endTime:$('endTime').value,
-      note:$('note').value.trim()
+      note:$('note').value.trim(),
+      attendanceEnabled:$('attendanceEnabled').checked,
+      deadlineDays:$('deadlineDays').value,
+      deadlineTime:$('deadlineTime').value
     };
     $('saveBtn').disabled=true;showStatus(el.modalStatus,'保存中…');
     assertOk(await jsonp('save',data));
@@ -443,16 +605,29 @@ async function deleteAttachment(id){
   }catch(e){toast(e.message)}
 }
 function shiftMonth(diff){const [y,m]=state.month.split('-').map(Number);loadMonth(monthKey(new Date(y,m-1+diff,1)))}
-function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});state.token='';sessionStorage.removeItem('scheduleToken');el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');showStatus(el.loginStatus,'')}
-function init(){
+function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});state.token='';state.role='';state.player=null;sessionStorage.removeItem('scheduleToken');sessionStorage.removeItem('scheduleRole');el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');showStatus(el.loginStatus,'')}
+async function init(){
   buildSelectors();state.selectedDate=todayKey();el.apiUrl.value=state.apiUrl;
   el.loginBtn.onclick=login;$('newBtn').onclick=()=>newEvent();$('prevBtn').onclick=()=>shiftMonth(-1);$('nextBtn').onclick=()=>shiftMonth(1);$('todayBtn').onclick=()=>loadMonth(monthKey(new Date()));
   $('sheetBtn').onclick=()=>{if(state.sourceUrl)window.open(state.sourceUrl,'_blank')};$('logoutBtn').onclick=()=>logout(true);
   $('closeBtn').onclick=closeModal;$('closeDetailBtn').onclick=closeModal;$('editBtn').onclick=editCurrent;$('copyBtn').onclick=copyCurrent;$('deleteBtn').onclick=deleteCurrent;
   $('cancelEditBtn').onclick=()=>state.currentEvent?renderDetail(state.currentEvent):closeModal();$('saveBtn').onclick=saveEvent;$('allDay').onchange=toggleTimes;
+  $('attendanceEnabled').onchange=toggleDeadline;
   el.modal.addEventListener('click',e=>{if(e.target===el.modal)closeModal()});
-  if(state.apiUrl&&state.token){el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');loadMonth(monthKey(new Date()))}
-  if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+
+  // LINE判定を最優先する。LINE起動時はコーチセッションを復元しない。
+  const handledByLine=await initLineLogin();
+  if(!handledByLine&&state.apiUrl&&state.token){
+    applyLogin({token:state.token,role:state.role||'coach',player:null});
+    await loadMonth(monthKey(new Date()));
+  }
+
+  if('serviceWorker' in navigator){
+    try{
+      const reg=await navigator.serviceWorker.register('./sw.js?v=4');
+      reg.update().catch(()=>{});
+    }catch(e){}
+  }
 }
 init();
 </script>
