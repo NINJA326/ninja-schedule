@@ -21,23 +21,23 @@
     .app{height:100dvh;width:100%;display:flex;flex-direction:column;overflow:hidden;padding:env(safe-area-inset-top) 6px env(safe-area-inset-bottom)}
     .top{flex:0 0 auto;background:rgba(7,17,31,.97);padding:8px 4px 6px;border-bottom:1px solid rgba(41,65,95,.55)}
     .toprow{display:flex;align-items:center;gap:8px;justify-content:space-between}
-    .brand h1{font-size:17px;margin:0;white-space:nowrap}.brand small{display:none}
-    .actions{display:flex;gap:5px}.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;padding:7px 9px;font-weight:800;cursor:pointer;min-height:36px}
+    .brand h1{font-size:17px;margin:0;white-space:nowrap;font-weight:700}.brand small{display:none}
+    .actions{display:flex;gap:5px}.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;padding:7px 9px;font-weight:650;cursor:pointer;min-height:36px}
     .btn.primary{background:var(--primary);border-color:var(--primary)}.btn.danger{background:var(--danger);border-color:var(--danger)}.btn.ghost{background:transparent}
     .btn:disabled{opacity:.55;cursor:not-allowed}
     .toolbar{flex:0 0 auto;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:6px;padding:7px 2px 5px}
-    .toolbar h2{text-align:center;margin:0;font-size:18px}.navs{display:flex;gap:4px}
+    .toolbar h2{text-align:center;margin:0;font-size:18px;font-weight:700}.navs{display:flex;gap:4px}
     .status{flex:0 0 auto;min-height:18px;color:var(--muted);font-size:11px;padding:0 4px 4px}.status.error{color:#fecaca}.status.ok{color:#bbf7d0}
     .calendar-wrap{flex:1 1 auto;min-height:0;overflow:hidden}
     .calendar{height:100%;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:28px repeat(6,minmax(0,1fr));border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
-    .dow{display:grid;place-items:center;font-size:11px;font-weight:900;background:#0a1627;border-right:1px solid var(--line)}
+    .dow{display:grid;place-items:center;font-size:11px;font-weight:700;background:#0a1627;border-right:1px solid var(--line)}
     .dow:nth-child(7){border-right:0}.dow.sun{color:#fca5a5}.dow.sat{color:#93c5fd}
     .day{position:relative;min-width:0;min-height:0;padding:2px;border-top:1px solid var(--line);border-right:1px solid var(--line);background:var(--panel);overflow:hidden}
-    .day:nth-child(7n){border-right:0}.day.out{opacity:.35}.day.today{box-shadow:inset 0 0 0 2px #60a5fa}
-    .dayhead{height:16px;display:flex;justify-content:space-between;align-items:center}.daynum{font-size:10px;font-weight:900}.addmini{border:0;background:transparent;color:#93c5fd;font-size:14px;line-height:1;padding:0 1px;cursor:pointer}
+    .day:nth-child(7n){border-right:0}.day.out{opacity:.35}.day.today{box-shadow:inset 0 0 0 1px rgba(96,165,250,.75)}.day.selected{background:#183150;box-shadow:inset 0 0 0 2px #f8fafc,0 0 14px rgba(96,165,250,.35);z-index:2}
+    .dayhead{height:16px;display:flex;justify-content:space-between;align-items:center}.daynum{font-size:10px;font-weight:700}.addmini{border:0;background:transparent;color:#93c5fd;font-size:14px;line-height:1;padding:0 1px;cursor:pointer}
     .event{display:block;width:100%;border:0;border-radius:4px;color:#fff;padding:2px 3px;margin:2px 0;cursor:pointer;text-align:left;overflow:hidden;line-height:1.08;box-shadow:0 1px 2px rgba(0,0,0,.18)}
     .event .cats,.event .kind{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .event .cats{font-size:8px;font-weight:800}.event .kind{font-size:9px;font-weight:900;margin-top:1px}
+    .event .cats{font-size:8px;font-weight:600}.event .kind{font-size:9px;font-weight:700;margin-top:1px}
     .more{font-size:8px;color:#cbd5e1;padding-left:2px}
     .login{min-height:100dvh;display:grid;place-items:center;padding:20px}.loginbox{width:min(420px,100%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:var(--shadow)}
     .loginbox h1{margin:0 0 6px}.loginbox p{color:var(--muted);margin:0 0 18px}
@@ -153,6 +153,7 @@ const state={
   events:[],
   sourceUrl:'',
   currentEvent:null,
+  selectedDate:'',
   mode:'detail'
 };
 const $=id=>document.getElementById(id);
@@ -184,7 +185,8 @@ function esc(v){return String(v??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&l
 function showStatus(target,msg,type=''){target.textContent=msg||'';target.className='status'+(type?' '+type:'')}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}
 function monthKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}
-function todayKey(){return new Date().toISOString().slice(0,10)}
+function localDateKey(d=new Date()){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function todayKey(){return localDateKey(new Date())}
 function typeDef(name){return TYPES.find(x=>x.name===name)||TYPES[0]}
 function categoriesText(e){return (Array.isArray(e.categories)?e.categories:parseCategories(e.category)).join('/')}
 function parseCategories(v){if(Array.isArray(v))return v.filter(Boolean);return String(v||'').split(/[\/,、|]/).map(s=>s.trim()).filter(Boolean)}
@@ -282,9 +284,9 @@ function renderCalendar(){
   let html=['日','月','火','水','木','金','土'].map((d,i)=>`<div class="dow ${i===0?'sun':i===6?'sat':''}">${d}</div>`).join('');
   for(let i=0;i<42;i++){
     const d=new Date(start);d.setDate(start.getDate()+i);
-    const key=monthKey(d),date=d.toISOString().slice(0,10);
+    const key=monthKey(d),date=localDateKey(d);
     const events=state.events.filter(e=>e.date===date);
-    html+=`<div class="day ${key!==state.month?'out':''} ${date===todayKey()?'today':''}" data-date="${date}">
+    html+=`<div class="day ${key!==state.month?'out':''} ${date===todayKey()?'today':''} ${date===state.selectedDate?'selected':''}" data-date="${date}">
       <div class="dayhead"><span class="daynum">${d.getDate()}</span><button class="addmini" data-add="${date}" aria-label="予定追加">＋</button></div>
       ${events.slice(0,2).map(e=>`<button class="event" style="background:${esc(e.color||typeDef(e.type).color)}" data-id="${esc(e.scheduleId)}">
         <span class="cats">${esc(categoriesText(e))}</span><span class="kind">${esc(e.type||'予定')}</span></button>`).join('')}
@@ -292,8 +294,12 @@ function renderCalendar(){
     </div>`;
   }
   el.calendar.innerHTML=html;
-  el.calendar.querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',ev=>{ev.stopPropagation();newEvent(b.dataset.add)}));
-  el.calendar.querySelectorAll('[data-id]').forEach(b=>b.addEventListener('click',ev=>{ev.stopPropagation();const e=state.events.find(x=>x.scheduleId===b.dataset.id);if(e)renderDetail(e)}));
+  el.calendar.querySelectorAll('.day').forEach(cell=>cell.addEventListener('click',()=>{
+    state.selectedDate=cell.dataset.date;
+    el.calendar.querySelectorAll('.day').forEach(x=>x.classList.toggle('selected',x.dataset.date===state.selectedDate));
+  }));
+  el.calendar.querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',ev=>{ev.stopPropagation();state.selectedDate=b.dataset.add;renderCalendar();newEvent(b.dataset.add)}));
+  el.calendar.querySelectorAll('[data-id]').forEach(b=>b.addEventListener('click',ev=>{ev.stopPropagation();const e=state.events.find(x=>x.scheduleId===b.dataset.id);if(e){state.selectedDate=e.date;renderCalendar();renderDetail(e)}}));
 }
 function newEvent(date=todayKey()){
   state.currentEvent=null;$('modalTitle').textContent='予定追加';fillForm({date,type:'練習',categories:[]});showStatus(el.modalStatus,'');setMode('edit');openModal()
@@ -387,7 +393,7 @@ async function deleteAttachment(id){
 function shiftMonth(diff){const [y,m]=state.month.split('-').map(Number);loadMonth(monthKey(new Date(y,m-1+diff,1)))}
 function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});state.token='';sessionStorage.removeItem('scheduleToken');el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');showStatus(el.loginStatus,'')}
 function init(){
-  buildSelectors();el.apiUrl.value=state.apiUrl;
+  buildSelectors();state.selectedDate=todayKey();el.apiUrl.value=state.apiUrl;
   el.loginBtn.onclick=login;$('newBtn').onclick=()=>newEvent();$('prevBtn').onclick=()=>shiftMonth(-1);$('nextBtn').onclick=()=>shiftMonth(1);$('todayBtn').onclick=()=>loadMonth(monthKey(new Date()));
   $('sheetBtn').onclick=()=>{if(state.sourceUrl)window.open(state.sourceUrl,'_blank')};$('logoutBtn').onclick=()=>logout(true);
   $('closeBtn').onclick=closeModal;$('closeDetailBtn').onclick=closeModal;$('editBtn').onclick=editCurrent;$('copyBtn').onclick=copyCurrent;$('deleteBtn').onclick=deleteCurrent;
