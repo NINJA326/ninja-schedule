@@ -2,10 +2,8 @@
   "name": "NINJA AIRS 練習予定表",
   "short_name": "練習予定表",
   "start_url": "./",
-  "scope": "./",
   "display": "standalone",
   "background_color": "#07111f",
-  "theme_color": "#0f172a",
-  "lang": "ja",
-  "description": "NINJA AIRS コーチ用練習予定表アプリ"
+  "theme_color": "#07111f",
+  "lang": "ja"
 }
