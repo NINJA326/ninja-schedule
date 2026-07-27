@@ -2,10 +2,109 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
   <title>NINJA AIRS 練習予定表</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    :root{--bg:#07111f;--panel:#0f1d31;--panel2:#13243b;--line:#29415f;--text:#f8fafc;--muted:#a9b8cb;--primary:#2563eb;--danger:#dc2626;--ok:#16a34a;--shadow:0 14px 35px rgba(0,0,0,.28)}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;background:var(--bg);color:var(--text)}
+    button,input,select,textarea{font:inherit}.hidden{display:none!important}.app{width:min(1180px,100%);margin:auto;padding:12px 12px 40px}
+    .top{position:sticky;top:0;z-index:20;background:rgba(7,17,31,.94);backdrop-filter:blur(12px);padding:10px 0 12px;border-bottom:1px solid rgba(41,65,95,.55)}
+    .toprow{display:flex;align-items:center;gap:10px;justify-content:space-between}.brand h1{font-size:21px;margin:0}.brand small{color:var(--muted)}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:11px;padding:10px 13px;font-weight:800;cursor:pointer;min-height:42px}.btn:hover{filter:brightness(1.1)}.btn.primary{background:var(--primary);border-color:var(--primary)}.btn.danger{background:var(--danger);border-color:var(--danger)}.btn.ghost{background:transparent}.btn:disabled{opacity:.55;cursor:not-allowed}
+    .toolbar{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin:16px 0}.toolbar h2{text-align:center;margin:0;font-size:22px}.navs{display:flex;gap:7px}.status{min-height:22px;color:var(--muted);font-size:13px;margin:4px 0 8px}.status.error{color:#fecaca}.status.ok{color:#bbf7d0}
+    .calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel);box-shadow:var(--shadow)}
+    .dow{padding:10px 4px;text-align:center;font-size:12px;font-weight:900;background:#0a1627;border-right:1px solid var(--line)}.dow:nth-child(7){border-right:0}.dow.sun{color:#fca5a5}.dow.sat{color:#93c5fd}
+    .day{min-height:132px;padding:7px;border-top:1px solid var(--line);border-right:1px solid var(--line);background:var(--panel);overflow:hidden}.day:nth-child(7n){border-right:0}.day.out{opacity:.38}.day.today{box-shadow:inset 0 0 0 2px #60a5fa}.dayhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}.daynum{font-weight:900}.addmini{border:0;background:transparent;color:#93c5fd;font-size:19px;cursor:pointer;padding:0 5px}
+    .event{display:block;width:100%;text-align:left;border:0;border-left:4px solid var(--event-color,#2563eb);background:#182b45;color:var(--text);border-radius:7px;padding:6px 7px;margin:4px 0;cursor:pointer;overflow:hidden}.event .time{font-size:10px;color:#cbd5e1}.event .title{display:block;font-size:12px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.event .cat{display:block;font-size:10px;color:#a9b8cb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .login{min-height:100vh;display:grid;place-items:center;padding:20px}.loginbox{width:min(420px,100%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:var(--shadow)}.loginbox h1{margin:0 0 6px}.loginbox p{color:var(--muted);margin:0 0 18px}.field{display:grid;gap:6px;margin:12px 0}.field label{font-size:12px;color:var(--muted);font-weight:800}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);background:#071425;color:var(--text);border-radius:10px;padding:11px 12px;min-height:44px}.field textarea{min-height:88px;resize:vertical}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.check{display:flex;align-items:center;gap:8px;padding:8px 0}
+    .modal{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.72);display:none;padding:16px;overflow:auto}.modal.open{display:flex;align-items:flex-start;justify-content:center}.dialog{width:min(620px,100%);background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);margin:auto;overflow:hidden}.dialoghead{position:sticky;top:0;background:var(--panel);z-index:2;padding:16px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.dialoghead h3{margin:0}.close{border:0;background:transparent;color:white;font-size:27px;cursor:pointer}.dialogbody{padding:16px 18px}.dialogfoot{position:sticky;bottom:0;background:var(--panel);border-top:1px solid var(--line);padding:13px 18px;display:flex;justify-content:space-between;gap:9px;flex-wrap:wrap}.right{display:flex;gap:8px;margin-left:auto}
+    .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:100;background:#020617;color:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;box-shadow:var(--shadow);display:none}.toast.show{display:block}
+    @media(max-width:760px){.app{padding:8px 6px 30px}.brand h1{font-size:17px}.brand small{display:none}.toolbar{grid-template-columns:1fr;gap:8px}.toolbar h2{order:-1}.navs{justify-content:center}.toolbar>.btn{justify-self:center}.calendar{border-radius:10px}.dow{font-size:10px;padding:7px 2px}.day{min-height:104px;padding:3px}.daynum{font-size:12px}.addmini{font-size:16px}.event{padding:4px 4px;border-left-width:3px}.event .title{font-size:10px}.event .cat,.event .time{font-size:8px}.grid2{grid-template-columns:1fr}.actions .btn.ghost{display:none}}
+  </style>
 </head>
 <body>
-  <h1>NINJA AIRS 練習予定表</h1>
+  <section id="loginView" class="login">
+    <div class="loginbox">
+      <h1>NINJA AIRS</h1><p>練習予定表・コーチ専用</p>
+      <div class="field"><label for="apiUrl">Apps Script WebアプリURL</label><input id="apiUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec"></div>
+      <div class="field"><label for="password">パスワード</label><input id="password" type="password" inputmode="numeric" autocomplete="current-password"></div>
+      <button id="loginBtn" class="btn primary" style="width:100%">ログイン</button>
+      <div id="loginStatus" class="status"></div>
+    </div>
+  </section>
+
+  <main id="appView" class="app hidden">
+    <header class="top">
+      <div class="toprow">
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>独立カレンダーアプリ</small></div>
+        <div class="actions"><button id="newBtn" class="btn primary">＋ 予定追加</button><button id="sheetBtn" class="btn ghost">予定表を開く</button><button id="logoutBtn" class="btn ghost">ログアウト</button></div>
+      </div>
+    </header>
+    <div class="toolbar">
+      <div class="navs"><button id="prevBtn" class="btn">‹ 前月</button><button id="todayBtn" class="btn">今日</button></div>
+      <h2 id="monthTitle">--</h2>
+      <button id="nextBtn" class="btn">翌月 ›</button>
+    </div>
+    <div id="status" class="status"></div>
+    <section id="calendar" class="calendar" aria-label="月間カレンダー"></section>
+  </main>
+
+  <div id="modal" class="modal" aria-hidden="true">
+    <form id="eventForm" class="dialog">
+      <div class="dialoghead"><h3 id="modalTitle">予定追加</h3><button type="button" id="closeBtn" class="close">×</button></div>
+      <div class="dialogbody">
+        <input id="scheduleId" type="hidden"><input id="sourceRef" type="hidden">
+        <div class="grid2"><div class="field"><label>日付 *</label><input id="date" type="date" required></div><div class="field"><label>カテゴリー *</label><input id="category" list="categoryList" placeholder="例：女子U13" required><datalist id="categoryList"></datalist></div></div>
+        <div class="grid2"><div class="field"><label>種類</label><select id="type"><option>練習</option><option>シューティング</option><option>特別練習</option><option>試合・遠征</option><option>OFF</option><option>その他</option></select></div><div class="field"><label>表示色</label><input id="color" type="color" value="#2563eb"></div></div>
+        <div class="field"><label>予定名</label><input id="title" placeholder="例：チーム練習"></div>
+        <div class="field"><label>会場</label><input id="location" placeholder="例：龍谷大学瀬田キャンパス体育館"></div>
+        <label class="check"><input id="allDay" type="checkbox">終日</label>
+        <div id="timeFields" class="grid2"><div class="field"><label>開始</label><input id="startTime" type="time"></div><div class="field"><label>終了</label><input id="endTime" type="time"></div></div>
+        <div class="field"><label>備考</label><textarea id="note" placeholder="連絡事項など"></textarea></div>
+        <div id="modalStatus" class="status"></div>
+      </div>
+      <div class="dialogfoot"><button type="button" id="deleteBtn" class="btn danger hidden">削除</button><div class="right"><button type="button" id="copyBtn" class="btn hidden">複写</button><button type="button" id="cancelBtn" class="btn">取消</button><button type="submit" id="saveBtn" class="btn primary">保存</button></div></div>
+    </form>
+  </div>
+  <div id="toast" class="toast"></div>
+
+<script>
+'use strict';
+const state={apiUrl:localStorage.getItem('scheduleApiUrl')||'',token:sessionStorage.getItem('scheduleToken')||'',month:'',events:[],categories:[],sourceUrl:''};
+const $=id=>document.getElementById(id);
+const el={loginView:$('loginView'),appView:$('appView'),apiUrl:$('apiUrl'),password:$('password'),loginBtn:$('loginBtn'),loginStatus:$('loginStatus'),calendar:$('calendar'),monthTitle:$('monthTitle'),status:$('status'),modal:$('modal'),form:$('eventForm'),modalStatus:$('modalStatus'),saveBtn:$('saveBtn'),deleteBtn:$('deleteBtn'),copyBtn:$('copyBtn')};
+
+function jsonp(action,params={}){return new Promise((resolve,reject)=>{if(!state.apiUrl)return reject(new Error('Apps Script URLを入力してください。'));const cb='cb_'+Date.now()+'_'+Math.random().toString(36).slice(2);const script=document.createElement('script');const timer=setTimeout(()=>finish(new Error('通信がタイムアウトしました。')),20000);function finish(err,data){clearTimeout(timer);delete window[cb];script.remove();err?reject(err):resolve(data)}window[cb]=data=>{if(!data||data.status!=='ok')return finish(new Error(data&&data.message?data.message:'処理に失敗しました。'));finish(null,data)};script.onerror=()=>finish(new Error('Apps Scriptへ接続できません。'));const q=new URLSearchParams(Object.assign({},params,{action,callback:cb,_:Date.now()}));script.src=state.apiUrl+(state.apiUrl.includes('?')?'&':'?')+q.toString();document.body.appendChild(script)})}
+function setStatus(target,msg,type=''){target.textContent=msg||'';target.className='status'+(type?' '+type:'')}
+function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2400)}
+function monthKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}
+function shiftMonth(key,delta){const [y,m]=key.split('-').map(Number);return monthKey(new Date(y,m-1+delta,1))}
+function todayKey(){return new Date().toISOString().slice(0,10)}
+function escapeHtml(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+async function login(){const url=el.apiUrl.value.trim().replace(/\/$/,'');const password=el.password.value;if(!url||!password)return setStatus(el.loginStatus,'URLとパスワードを入力してください。','error');state.apiUrl=url;el.loginBtn.disabled=true;setStatus(el.loginStatus,'ログイン中…');try{const res=await jsonp('login',{password});state.token=res.token;localStorage.setItem('scheduleApiUrl',url);sessionStorage.setItem('scheduleToken',state.token);el.password.value='';showApp();await loadMonth(monthKey(new Date()))}catch(e){setStatus(el.loginStatus,e.message,'error')}finally{el.loginBtn.disabled=false}}
+function showApp(){el.loginView.classList.add('hidden');el.appView.classList.remove('hidden')}
+function showLogin(){el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');el.apiUrl.value=state.apiUrl}
+async function logout(){try{if(state.token)await jsonp('logout',{token:state.token})}catch(e){}state.token='';sessionStorage.removeItem('scheduleToken');showLogin()}
+
+async function loadMonth(month){state.month=month;el.monthTitle.textContent=month.replace('-','年')+'月';setStatus(el.status,'カレンダーを読み込み中…');try{const res=await jsonp('events',{token:state.token,month});state.events=res.events||[];state.categories=res.categories||[];state.sourceUrl=res.sourceUrl||'';renderCalendar();renderCategoryList();setStatus(el.status,(res.sheetName||month)+' を表示しています。','ok')}catch(e){setStatus(el.status,e.message,'error');if(/有効期限/.test(e.message)){state.token='';sessionStorage.removeItem('scheduleToken');showLogin()}}}
+function renderCategoryList(){const list=$('categoryList');list.innerHTML=state.categories.map(v=>'<option value="'+escapeHtml(v)+'"></option>').join('')}
+function renderCalendar(){const [y,m]=state.month.split('-').map(Number);const first=new Date(y,m-1,1);const start=new Date(y,m-1,1-first.getDay());let html=['日','月','火','水','木','金','土'].map((d,i)=>'<div class="dow '+(i===0?'sun':i===6?'sat':'')+'">'+d+'</div>').join('');for(let i=0;i<42;i++){const d=new Date(start);d.setDate(start.getDate()+i);const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');const out=d.getMonth()!==m-1;const dayEvents=state.events.filter(e=>e.date===key);html+='<div class="day '+(out?'out ':'')+(key===todayKey()?'today':'')+'"><div class="dayhead"><span class="daynum">'+d.getDate()+'</span><button class="addmini" data-add="'+key+'" aria-label="予定追加">＋</button></div>'+dayEvents.slice(0,6).map(renderEvent).join('')+(dayEvents.length>6?'<div class="event"><span class="title">ほか '+(dayEvents.length-6)+'件</span></div>':'')+'</div>'}el.calendar.innerHTML=html}
+function renderEvent(e){const time=e.allDay?'終日':([e.startTime,e.endTime].filter(Boolean).join('〜')||'時間未設定');return '<button class="event" style="--event-color:'+escapeHtml(e.color||'#2563eb')+'" data-id="'+escapeHtml(e.scheduleId)+'"><span class="time">'+escapeHtml(time)+'</span><span class="title">'+escapeHtml(e.title||e.location||'予定')+'</span><span class="cat">'+escapeHtml(e.category||'')+'</span></button>'}
+
+function openModal(event,date){el.form.reset();$('scheduleId').value='';$('sourceRef').value='';$('date').value=date||todayKey();$('color').value='#2563eb';$('type').value='練習';$('allDay').checked=false;toggleTimeFields();$('modalTitle').textContent='予定追加';el.deleteBtn.classList.add('hidden');el.copyBtn.classList.add('hidden');el.saveBtn.classList.remove('hidden');setStatus(el.modalStatus,'');if(event){$('scheduleId').value=event.scheduleId||'';$('sourceRef').value=event.sourceRef||'';$('date').value=event.date||todayKey();$('category').value=event.category||'';$('type').value=event.type||'練習';$('title').value=event.title||'';$('location').value=event.location||'';$('allDay').checked=!!event.allDay;$('startTime').value=event.startTime||'';$('endTime').value=event.endTime||'';$('note').value=event.note||'';$('color').value=/^#[0-9a-f]{6}$/i.test(event.color||'')?event.color:'#2563eb';toggleTimeFields();$('modalTitle').textContent=event.source==='app'?'予定編集':'予定詳細';if(event.source==='app'){el.deleteBtn.classList.remove('hidden');el.copyBtn.classList.remove('hidden')}else{el.saveBtn.classList.add('hidden');setStatus(el.modalStatus,'スプレッドシートへ直接入力された予定は、この画面では編集できません。')}}el.modal.classList.add('open');el.modal.setAttribute('aria-hidden','false')}
+function closeModal(){el.modal.classList.remove('open');el.modal.setAttribute('aria-hidden','true')}
+function toggleTimeFields(){$('timeFields').classList.toggle('hidden',$('allDay').checked)}
+function formData(){return {token:state.token,scheduleId:$('scheduleId').value,sourceRef:$('sourceRef').value,date:$('date').value,category:$('category').value.trim(),type:$('type').value,title:$('title').value.trim(),location:$('location').value.trim(),allDay:$('allDay').checked,startTime:$('startTime').value,endTime:$('endTime').value,note:$('note').value.trim(),color:$('color').value}}
+async function saveEvent(ev){ev.preventDefault();const data=formData();el.saveBtn.disabled=true;setStatus(el.modalStatus,'保存中…');try{await jsonp('save',data);setStatus(el.modalStatus,'保存しました。','ok');toast('予定を保存しました');closeModal();await loadMonth(data.date.slice(0,7))}catch(e){setStatus(el.modalStatus,e.message,'error')}finally{el.saveBtn.disabled=false}}
+async function deleteEvent(){if(!confirm('この予定を削除しますか？'))return;el.deleteBtn.disabled=true;setStatus(el.modalStatus,'削除中…');try{await jsonp('delete',{token:state.token,scheduleId:$('scheduleId').value,sourceRef:$('sourceRef').value});toast('予定を削除しました');closeModal();await loadMonth(state.month)}catch(e){setStatus(el.modalStatus,e.message,'error')}finally{el.deleteBtn.disabled=false}}
+function copyEvent(){const originalDate=$('date').value;$('scheduleId').value='';$('sourceRef').value='';$('modalTitle').textContent='予定を複写';el.deleteBtn.classList.add('hidden');el.copyBtn.classList.add('hidden');$('date').value=originalDate;setStatus(el.modalStatus,'日付や内容を変更して保存してください。','ok')}
+
+el.apiUrl.value=state.apiUrl;el.loginBtn.addEventListener('click',login);el.password.addEventListener('keydown',e=>{if(e.key==='Enter')login()});$('logoutBtn').addEventListener('click',logout);$('prevBtn').addEventListener('click',()=>loadMonth(shiftMonth(state.month,-1)));$('nextBtn').addEventListener('click',()=>loadMonth(shiftMonth(state.month,1)));$('todayBtn').addEventListener('click',()=>loadMonth(monthKey(new Date())));$('newBtn').addEventListener('click',()=>openModal(null,todayKey()));$('sheetBtn').addEventListener('click',()=>{if(state.sourceUrl)window.open(state.sourceUrl,'_blank')});el.calendar.addEventListener('click',e=>{const add=e.target.closest('[data-add]');if(add)return openModal(null,add.dataset.add);const btn=e.target.closest('[data-id]');if(btn){const item=state.events.find(x=>x.scheduleId===btn.dataset.id);if(item)openModal(item)}});$('closeBtn').addEventListener('click',closeModal);$('cancelBtn').addEventListener('click',closeModal);$('allDay').addEventListener('change',toggleTimeFields);el.form.addEventListener('submit',saveEvent);el.deleteBtn.addEventListener('click',deleteEvent);el.copyBtn.addEventListener('click',copyEvent);el.modal.addEventListener('click',e=>{if(e.target===el.modal)closeModal()});
+if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+(async function init(){if(state.token&&state.apiUrl){showApp();await loadMonth(monthKey(new Date()))}else showLogin()})();
+</script>
 </body>
 </html>
