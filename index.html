@@ -88,7 +88,7 @@
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
-  <script src="./config.js?v=7.1.0.0"></script>
+  <script src="./config.js?v=8.0.0"></script>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
@@ -104,7 +104,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v7.1-player</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v8-player</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">予定表</button>
@@ -224,7 +224,8 @@ const state={
   selectedDate:'',
   categoryFilter:'ALL',
   mode:'detail',
-  loadingMonth:false
+  loadingMonth:false,
+  dataVersion:''
 };
 const $=id=>document.getElementById(id);
 const el={
@@ -234,12 +235,12 @@ const el={
   detailFoot:$('detailFoot'),editFoot:$('editFoot'),modalStatus:$('modalStatus')
 };
 
-function jsonp(action,params={}){
+function jsonp(action,params={},timeoutMs=25000){
   return new Promise((resolve,reject)=>{
     if(!state.apiUrl||state.apiUrl.indexOf('ここにApps Script')===0)return reject(new Error('Apps Script URLを入力してください。'));
     const cb='cb_'+Date.now()+'_'+Math.random().toString(36).slice(2);
     const script=document.createElement('script');
-    const timer=setTimeout(()=>finish(new Error('通信がタイムアウトしました。')),25000);
+    const timer=setTimeout(()=>finish(new Error('通信がタイムアウトしました。')),timeoutMs);
     function finish(err,data){
       clearTimeout(timer);delete window[cb];script.remove();err?reject(err):resolve(data);
     }
@@ -428,7 +429,7 @@ async function initPlayerLogin(){
     await liff.init({liffId:state.liffId,withLoginOnExternalBrowser:true});
 
     if(!liff.isLoggedIn()){
-      liff.login({redirectUri:location.origin+location.pathname+'?mode=player&v=7.1'});
+      liff.login({redirectUri:location.origin+location.pathname+'?mode=player&v=8'});
       return;
     }
 
@@ -454,8 +455,8 @@ function applyLogin(res){
   $('sheetBtn').classList.add('hidden');
   $('roleBadge').textContent=(state.player?.playerName||'選手')+' / '+(state.player?.category||'');
 }
-const MONTH_CACHE_TTL_MS=10*60*1000;
-function monthCacheKey(month){return 'ninjaScheduleMonthV7:'+month}
+const MONTH_CACHE_TTL_MS=24*60*60*1000;
+function monthCacheKey(month){return 'ninjaScheduleMonthV8:'+month}
 function readMonthCache(month){
   try{
     const raw=localStorage.getItem(monthCacheKey(month));
@@ -464,46 +465,78 @@ function readMonthCache(month){
     return data&&Array.isArray(data.events)?data:null;
   }catch(e){return null}
 }
-function writeMonthCache(month,events,sourceUrl){
-  try{localStorage.setItem(monthCacheKey(month),JSON.stringify({savedAt:Date.now(),events,sourceUrl:sourceUrl||''}))}catch(e){}
+function writeMonthCache(month,events,sourceUrl,version){
+  try{
+    const old=readMonthCache(month)||{};
+    localStorage.setItem(monthCacheKey(month),JSON.stringify({
+      savedAt:Date.now(),events,sourceUrl:sourceUrl||'',version:version||old.version||state.dataVersion||''
+    }));
+  }catch(e){}
 }
-function upsertLocalEvent(event){
+function upsertLocalEvent(event,version=''){
   if(!event||!event.scheduleId)return;
   state.events=state.events.filter(x=>x.scheduleId!==event.scheduleId);
   if(event.date&&event.date.slice(0,7)===state.month)state.events.push(event);
   state.events.sort((a,b)=>a.date.localeCompare(b.date)||(a.startTime||'').localeCompare(b.startTime||''));
-  writeMonthCache(state.month,state.events,state.sourceUrl);
+  if(version)state.dataVersion=version;
+  writeMonthCache(state.month,state.events,state.sourceUrl,state.dataVersion);
   renderCalendar();
 }
-function removeLocalEvent(scheduleId){
+function removeLocalEvent(scheduleId,version=''){
   state.events=state.events.filter(x=>x.scheduleId!==scheduleId);
-  writeMonthCache(state.month,state.events,state.sourceUrl);
+  if(version)state.dataVersion=version;
+  writeMonthCache(state.month,state.events,state.sourceUrl,state.dataVersion);
   renderCalendar();
+}
+async function fetchMonthData(month,cached){
+  state.loadingMonth=true;
+  try{
+    const res=assertOk(await jsonp('events',{token:state.token,month},25000));
+    if(state.month!==month)return;
+    state.events=res.events||[];
+    state.sourceUrl=res.sourceUrl||'';
+    state.dataVersion=res.version||state.dataVersion||'';
+    writeMonthCache(month,state.events,state.sourceUrl,state.dataVersion);
+    renderCalendar();
+    showStatus(el.status,`${month.replace('-','.')} を表示しています。`,'ok');
+  }catch(e){
+    if(!cached)showStatus(el.status,e.message,'error');
+    else showStatus(el.status,'保存済みの予定を表示しています。次回自動更新します。','error');
+    if(/ログイン/.test(e.message))logout(false);
+  }finally{state.loadingMonth=false}
+}
+async function refreshMonthInBackground(month,cached){
+  try{
+    const ver=assertOk(await jsonp('monthVersion',{token:state.token,month},8000));
+    if(state.month!==month)return;
+    const remoteVersion=String(ver.version||'');
+    if(remoteVersion&&remoteVersion===String(cached.version||'')){
+      state.dataVersion=remoteVersion;
+      showStatus(el.status,`${month.replace('-','.')} を表示しています。`,'ok');
+      return;
+    }
+    await fetchMonthData(month,cached);
+  }catch(e){
+    if(state.month===month)showStatus(el.status,`${month.replace('-','.')} を表示しています。`,'ok');
+  }
 }
 async function loadMonth(month,{force=false}={}){
-  if(state.loadingMonth)return;
   state.month=month;
   const cached=readMonthCache(month);
   if(cached){
-    state.events=cached.events||[];state.sourceUrl=cached.sourceUrl||'';
+    state.events=cached.events||[];
+    state.sourceUrl=cached.sourceUrl||'';
+    state.dataVersion=cached.version||'';
     renderCalendar();
-    showStatus(el.status,`${month.replace('-','.')} を表示しています。更新確認中…`,'ok');
-    if(!force&&Date.now()-(cached.savedAt||0)<MONTH_CACHE_TTL_MS)return;
-  }else{
-    showStatus(el.status,'予定を読み込んでいます…');
+    showStatus(el.status,`${month.replace('-','.')} を表示しています。`,'ok');
+    if(force){await fetchMonthData(month,cached);return;}
+    refreshMonthInBackground(month,cached);
+    return;
   }
-  state.loadingMonth=true;
-  try{
-    const res=assertOk(await jsonp('events',{token:state.token,month}));
-    if(state.month!==month)return;
-    state.events=res.events||[];state.sourceUrl=res.sourceUrl||'';
-    writeMonthCache(month,state.events,state.sourceUrl);
-    renderCalendar();showStatus(el.status,`${month.replace('-','.')} を表示しています。`,'ok');
-  }catch(e){
-    if(!cached)showStatus(el.status,e.message,'error');
-    else showStatus(el.status,'保存済みの予定を表示中です。通信更新に失敗しました。','error');
-    if(/ログイン/.test(e.message))logout(false)
-  }finally{state.loadingMonth=false}
+  state.events=[];state.sourceUrl='';state.dataVersion='';
+  renderCalendar();
+  showStatus(el.status,'予定を読み込んでいます…');
+  await fetchMonthData(month,null);
 }
 
 function filteredEventsForDate(date){
@@ -586,15 +619,15 @@ async function saveEvent(){
     const res=assertOk(await jsonp('save',data));
     const targetMonth=data.date.slice(0,7);
     closeModal();toast('保存しました。');
-    if(targetMonth===state.month&&res.event)upsertLocalEvent(res.event);
+    if(targetMonth===state.month&&res.event)upsertLocalEvent(res.event,res.version||'');
     else await loadMonth(targetMonth,{force:true});
   }catch(e){showStatus(el.modalStatus,e.message,'error')}finally{$('saveBtn').disabled=false}
 }
 async function deleteCurrent(){
   if(!state.currentEvent||!confirm('この予定を削除しますか？'))return;
   try{
-    assertOk(await jsonp('delete',{token:state.token,scheduleId:state.currentEvent.scheduleId,sourceRef:state.currentEvent.sourceRef||''}));
-    const deletedId=state.currentEvent.scheduleId;closeModal();removeLocalEvent(deletedId);toast('削除しました。');
+    const res=assertOk(await jsonp('delete',{token:state.token,scheduleId:state.currentEvent.scheduleId,sourceRef:state.currentEvent.sourceRef||''}));
+    const deletedId=state.currentEvent.scheduleId;closeModal();removeLocalEvent(deletedId,res.version||'');toast('削除しました。');
   }catch(e){toast(e.message)}
 }
 async function uploadAttachment(){
@@ -719,7 +752,7 @@ function logout(callApi=true){
   $('bootMessage').textContent='LINE選手認証を確認しています…';
   showStatus($('lineLoginStatus'),'');
   if(typeof liff!=='undefined'&&liff.isLoggedIn())liff.logout();
-  location.replace(location.origin+location.pathname+'?mode=player&v=7.1');
+  location.replace(location.origin+location.pathname+'?mode=player&v=8');
 }
 function enableMonthSwipe(){
   const target=document.querySelector('.calendar-wrap');
@@ -771,12 +804,12 @@ async function init(){
   if('caches' in window){
     try{
       const keys=await caches.keys();
-      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v7-1').map(k=>caches.delete(k)));
+      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v8').map(k=>caches.delete(k)));
     }catch(e){}
   }
   if('serviceWorker' in navigator){
     try{
-      const reg=await navigator.serviceWorker.register('./sw.js?v=7.1.0.0');
+      const reg=await navigator.serviceWorker.register('./sw.js?v=8.0.0');
       reg.update().catch(()=>{});
     }catch(e){}
   }
