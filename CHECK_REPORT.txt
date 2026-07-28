@@ -1,0 +1,26 @@
+NINJA SCHEDULE v9 静的確認結果
+
+確認済み
+- coach.html JavaScript構文: OK
+- index.html JavaScript構文: OK
+- sw.js JavaScript構文: OK
+- Code.gs JavaScript構文: OK
+- 起動時のmonthVersion呼び出し: なし
+- 起動時のevents自動取得: なし
+- 月移動時のevents自動取得: なし
+- 日付クリック時の通信: なし
+- 予定詳細表示時のevent API通信: なし
+- 手動読込ボタン: events APIを明示実行
+- 予定保存: save API成功後に端末キャッシュを差分更新
+- 予定削除: delete API成功後に端末キャッシュを差分更新
+- 出欠選択画面: ローカル表示
+- 出欠登録: saveAttendance API実行時のみ通信
+- Service Workerキャッシュ名: ninja-schedule-v9
+- 表示ビルド番号: build v9-coach / build v9-player
+
+未実施
+- 実際のApps Scriptデプロイ環境での保存試験
+- 実際のLINE LIFF端末での出欠登録試験
+- GitHub Pages公開後の実機試験
+
+上記3項目は、利用者の本番環境への配置後に確認が必要です。
