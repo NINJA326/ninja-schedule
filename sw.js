@@ -1,5 +1,5 @@
 'use strict';
-const CACHE_NAME='ninja-schedule-v9-3';
+const CACHE_NAME='ninja-schedule-v9-4';
 const STATIC_FILES=['./manifest.json'];
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(STATIC_FILES)).catch(()=>{}))});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
