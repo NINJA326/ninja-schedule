@@ -88,7 +88,7 @@
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
-  <script src="./config.js?v=7.0.0"></script>
+  <script src="./config.js?v=7.1.0.0"></script>
 </head>
 <body>
   <section id="loginView" class="login">
@@ -105,7 +105,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ コーチ専用</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v7-coach</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ コーチ専用</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v7.1-coach</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">予定表</button>
@@ -731,12 +731,12 @@ async function init(){
   if('caches' in window){
     try{
       const keys=await caches.keys();
-      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v7').map(k=>caches.delete(k)));
+      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v7-1').map(k=>caches.delete(k)));
     }catch(e){}
   }
   if('serviceWorker' in navigator){
     try{
-      const reg=await navigator.serviceWorker.register('./sw.js?v=7.0.0');
+      const reg=await navigator.serviceWorker.register('./sw.js?v=7.1.0.0');
       reg.update().catch(()=>{});
     }catch(e){}
   }
