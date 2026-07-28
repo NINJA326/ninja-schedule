@@ -88,7 +88,7 @@
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
-  <script src="./config.js?v=9.0.0"></script>
+  <script src="./config.js?v=9.1.0"></script>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
@@ -104,7 +104,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9-player</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.1-player</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">読込</button>
@@ -395,12 +395,34 @@ function showAttendanceForm(status,current={}){
   $('saveAttendanceBtn').onclick=()=>saveAttendance(status);
 }
 async function saveAttendance(status){
+  const button=$('saveAttendanceBtn');
   try{
-    const arrival=$('arrivalTime')?.value||'',reason=$('attendanceReason')?.value.trim()||'';
-    const res=assertOk(await jsonp('saveAttendance',{token:state.token,scheduleId:state.currentEvent.scheduleId,status,arrivalTime:arrival,reason}));
-    state.currentEvent.myAttendance=res.attendance;saveEventToLocalMonths(state.currentEvent);toast('出欠を登録しました。');
+    if(!state.currentEvent||!state.currentEvent.scheduleId)throw new Error('予定情報を確認できません。月を再読み込みしてください。');
+    const arrival=$('arrivalTime')?.value||'';
+    const reason=$('attendanceReason')?.value.trim()||'';
+    if(status==='遅刻'&&!arrival)throw new Error('到着予定時刻を入力してください。');
+    if((status==='遅刻'||status==='欠席')&&!reason)throw new Error(status+'理由を入力してください。');
+    if(button)button.disabled=true;
+    showStatus($('attendanceStatus'),'登録中…');
+    const res=assertOk(await jsonp('saveAttendance',{
+      token:state.token,
+      scheduleId:String(state.currentEvent.scheduleId),
+      status,
+      arrivalTime:arrival,
+      reason
+    },25000));
+    if(!res.attendance)throw new Error('登録結果を確認できませんでした。');
+    state.currentEvent={...state.currentEvent,myAttendance:res.attendance};
+    saveEventToLocalMonths(state.currentEvent);
     renderDetail(state.currentEvent);
-  }catch(e){showStatus($('attendanceStatus'),e.message,'error')}
+    toast('出欠を登録しました。');
+  }catch(e){
+    const target=$('attendanceStatus');
+    if(target)showStatus(target,e.message,'error');
+    else toast(e.message);
+  }finally{
+    if(button&&document.body.contains(button))button.disabled=false;
+  }
 }
 async function loadAttendanceSummary(scheduleId){
   try{
@@ -501,21 +523,25 @@ function removeLocalEvent(scheduleId){
   writeMonthCache(state.month,state.events,state.sourceUrl);
   renderCalendar();
 }
-function loadMonth(month){
+async function loadMonth(month,{force=false}={}){
   state.month=month;
   const cached=readMonthCache(month);
   state.events=cached&&Array.isArray(cached.events)?cached.events:[];
   state.sourceUrl=cached?.sourceUrl||'';
   renderCalendar();
-  showStatus(el.status,cached?`${month.replace('-','.')} を端末保存データから表示しています。`:'端末に予定がありません。「読込」で現在の月を取得してください。',cached?'ok':'');
-  return Promise.resolve();
+
+  if(cached&&!force){
+    showStatus(el.status,`${month.replace('-','.')} を端末保存データから表示しています。`,'ok');
+    return;
+  }
+
+  await fetchMonthOnce(month,{manual:force});
 }
-async function manualRefreshMonth(){
+async function fetchMonthOnce(month,{manual=false}={}){
   if(state.loadingMonth)return;
-  const month=state.month||monthKey(new Date());
   state.loadingMonth=true;
-  $('sheetBtn').disabled=true;
-  showStatus(el.status,'現在の月を読み込んでいます…');
+  if($('sheetBtn'))$('sheetBtn').disabled=true;
+  showStatus(el.status,manual?'現在の月を読み込んでいます…':'初回データを読み込んでいます…');
   try{
     const res=assertOk(await jsonp('events',{token:state.token,month},25000));
     if(state.month!==month)return;
@@ -524,14 +550,23 @@ async function manualRefreshMonth(){
     writeMonthCache(month,state.events,state.sourceUrl);
     renderCalendar();
     showStatus(el.status,`${month.replace('-','.')} を読み込みました。`,'ok');
-    toast('予定を読み込みました。');
+    if(manual)toast('予定を読み込みました。');
   }catch(e){
-    showStatus(el.status,e.message,'error');
+    const existing=readMonthCache(month);
+    if(existing){
+      showStatus(el.status,`${month.replace('-','.')} を端末保存データから表示しています。`,'ok');
+    }else{
+      showStatus(el.status,e.message,'error');
+    }
     if(/ログイン/.test(e.message))logout(false);
   }finally{
     state.loadingMonth=false;
-    $('sheetBtn').disabled=false;
+    if($('sheetBtn'))$('sheetBtn').disabled=false;
   }
+}
+async function manualRefreshMonth(){
+  const month=state.month||monthKey(new Date());
+  await loadMonth(month,{force:true});
 }
 
 function filteredEventsForDate(date){
@@ -802,12 +837,12 @@ async function init(){
   if('caches' in window){
     try{
       const keys=await caches.keys();
-      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v9').map(k=>caches.delete(k)));
+      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v9-1').map(k=>caches.delete(k)));
     }catch(e){}
   }
   if('serviceWorker' in navigator){
     try{
-      const reg=await navigator.serviceWorker.register('./sw.js?v=9.0.0');
+      const reg=await navigator.serviceWorker.register('./sw.js?v=9.1.0');
       reg.update().catch(()=>{});
     }catch(e){}
   }

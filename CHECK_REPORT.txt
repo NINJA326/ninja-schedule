@@ -1,26 +1,19 @@
-NINJA SCHEDULE v9 静的確認結果
+NINJA SCHEDULE v9.1 静的確認結果
 
 確認済み
-- coach.html JavaScript構文: OK
-- index.html JavaScript構文: OK
-- sw.js JavaScript構文: OK
-- Code.gs JavaScript構文: OK
-- 起動時のmonthVersion呼び出し: なし
-- 起動時のevents自動取得: なし
-- 月移動時のevents自動取得: なし
-- 日付クリック時の通信: なし
-- 予定詳細表示時のevent API通信: なし
-- 手動読込ボタン: events APIを明示実行
-- 予定保存: save API成功後に端末キャッシュを差分更新
-- 予定削除: delete API成功後に端末キャッシュを差分更新
-- 出欠選択画面: ローカル表示
-- 出欠登録: saveAttendance API実行時のみ通信
-- Service Workerキャッシュ名: ninja-schedule-v9
-- 表示ビルド番号: build v9-coach / build v9-player
+- 月キャッシュがない場合のみ events API を自動実行
+- 取得済み月への再移動では自動通信なし
+- 手動「読込」は強制再取得
+- 日付クリックと予定詳細表示は通信なし
+- 出欠登録時のみ saveAttendance API 通信
+- 出欠登録前の入力チェックあり
+- 出欠登録成功後に myAttendance を端末キャッシュへ保存
+- events API は選手カテゴリーで絞り込み
+- events API は本人の保存済み出欠回答を付加
+- 予定保存・削除の差分更新方式を維持
+- 既存UI、添付、スワイプ機能を維持
 
-未実施
-- 実際のApps Scriptデプロイ環境での保存試験
-- 実際のLINE LIFF端末での出欠登録試験
-- GitHub Pages公開後の実機試験
-
-上記3項目は、利用者の本番環境への配置後に確認が必要です。
+本番環境で必要な確認
+- Apps Script再デプロイ後の出席・遅刻・欠席登録
+- LINE LIFFで月初回自動読込
+- GitHub Pagesで取得済み月が再通信しないこと
