@@ -37,7 +37,7 @@
     .dayhead{height:16px;display:flex;justify-content:space-between;align-items:center}.daynum{font-size:10px;font-weight:700}.addmini{border:0;background:transparent;color:#93c5fd;font-size:14px;line-height:1;padding:0 1px;cursor:pointer}
     .event{display:block;width:100%;border:0;border-radius:4px;color:#fff;padding:2px 3px;margin:2px 0;cursor:pointer;text-align:left;overflow:hidden;line-height:1.08;box-shadow:0 1px 2px rgba(0,0,0,.18)}
     .event .cats,.event .kind{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .event .cats{font-size:8px;font-weight:600}.event .kind{font-size:9px;font-weight:700;margin-top:1px}
+    .event .cats{font-size:8px;font-weight:600}.event .kind{font-size:9px;font-weight:700;margin-top:1px}.compact-event{padding:1px 3px;margin:1px 0;min-height:14px}.compact-event .kind{font-size:8px;line-height:1.12;margin:0}
     .more{font-size:8px;color:#cbd5e1;padding-left:2px}
     .login{min-height:100dvh;display:grid;place-items:center;padding:20px}.loginbox{width:min(420px,100%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:var(--shadow)}
     .loginbox h1{margin:0 0 6px}.loginbox p{color:var(--muted);margin:0 0 18px}
@@ -104,7 +104,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.5-player</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.6-player</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">読込</button>
@@ -158,7 +158,7 @@
         <div class="attendance-card">
           <label class="category-choice" style="width:max-content"><input id="attendanceEnabled" type="checkbox">出欠回答を必須にする</label>
           <div id="deadlineFields" class="grid2 hidden">
-            <div class="field"><label>回答期限（予定日の何日前）</label><input id="deadlineDays" type="number" min="0" max="60" value="2"></div>
+            <div class="field"><label>回答期限日</label><input id="deadlineDate" type="date"></div>
             <div class="field"><label>締切時刻</label><input id="deadlineTime" type="time" value="21:00"></div>
           </div>
         </div>
@@ -190,7 +190,7 @@
 <script>
 'use strict';
 
-const CATEGORIES=[
+const BASE_CATEGORIES=[
   {value:'U13男子',label:'男子U13'},
   {value:'U14男子',label:'男子U14'},
   {value:'U15男子',label:'男子U15'},
@@ -198,6 +198,12 @@ const CATEGORIES=[
   {value:'U14女子',label:'女子U14'},
   {value:'U15女子',label:'女子U15'}
 ];
+const CATEGORY_GROUPS=[
+  {value:'男子全員',label:'男子全員',members:['U13男子','U14男子','U15男子']},
+  {value:'女子全員',label:'女子全員',members:['U13女子','U14女子','U15女子']},
+  {value:'全体',label:'全体',members:BASE_CATEGORIES.map(x=>x.value)}
+];
+const CATEGORIES=[...BASE_CATEGORIES,...CATEGORY_GROUPS];
 const COLOR_PRESETS=['#2563eb','#dc2626','#16a34a','#eab308','#7c3aed','#ea580c','#0891b2','#db2777','#6b7280','#92400e'];
 const TYPES=[
   {name:'練習',color:'#2563eb'},
@@ -265,6 +271,16 @@ function normalizeHexColor(value){
 }
 function categoriesText(e){return (Array.isArray(e.categories)?e.categories:parseCategories(e.category)).join('/')}
 function parseCategories(v){if(Array.isArray(v))return v.filter(Boolean);return String(v||'').split(/[\/,、|]/).map(s=>s.trim()).filter(Boolean)}
+function isDeadlineClosed(e){
+  if(!e||!e.attendanceEnabled||!e.deadlineAt)return false;
+  const d=new Date(String(e.deadlineAt).replace(' ','T'));
+  return !Number.isNaN(d.getTime())&&Date.now()>d.getTime();
+}
+function compactEventLabel(e){
+  const name=String(e.title||e.type||'予定').trim();
+  const time=e.allDay?'終日':String(e.startTime||'').slice(0,5);
+  return [name,time].filter(Boolean).join(' ');
+}
 function setMode(mode){
   state.mode=mode;
   const detail=mode==='detail';
@@ -290,7 +306,15 @@ function syncColorPreset(){
   const color=String($('eventColor').value||'').toLowerCase();
   document.querySelectorAll('[data-color]').forEach(btn=>btn.classList.toggle('selected',btn.dataset.color.toLowerCase()===color));
 }
-function selectedCategories(){return [...document.querySelectorAll('input[name=category]:checked')].map(x=>x.value)}
+function selectedCategories(){
+  const selected=[...document.querySelectorAll('input[name=category]:checked')].map(x=>x.value);
+  const expanded=[];
+  selected.forEach(value=>{
+    const group=CATEGORY_GROUPS.find(x=>x.value===value);
+    (group?group.members:[value]).forEach(category=>{if(!expanded.includes(category))expanded.push(category)});
+  });
+  return expanded;
+}
 function fillForm(e){
   $('scheduleId').value=e?.scheduleId||'';
   $('sourceRef').value=e?.sourceRef||'';
@@ -305,11 +329,14 @@ function fillForm(e){
   $('endTime').value=e?.endTime||'';
   $('note').value=e?.note||'';
   $('attendanceEnabled').checked=!!e?.attendanceEnabled;
-  $('deadlineDays').value=Number.isFinite(Number(e?.deadlineDays))?Number(e.deadlineDays):2;
-  $('deadlineTime').value=e?.deadlineTime||'21:00';
+  $('deadlineDate').value=e?.deadlineDate||String(e?.deadlineAt||'').slice(0,10)||e?.date||todayKey();
+  $('deadlineTime').value=e?.deadlineTime||String(e?.deadlineAt||'').slice(11,16)||'21:00';
   toggleDeadline();
   const cats=new Set(e?.categories||parseCategories(e?.category));
-  document.querySelectorAll('input[name=category]').forEach(x=>x.checked=cats.has(x.value));
+  document.querySelectorAll('input[name=category]').forEach(x=>{
+    const group=CATEGORY_GROUPS.find(g=>g.value===x.value);
+    x.checked=group?group.members.every(c=>cats.has(c)):cats.has(x.value);
+  });
   toggleTimes();
 }
 function renderDetail(e){
@@ -363,12 +390,13 @@ function renderAttendancePanel(e){
   const deadline=e.deadlineAt||'';
   if(state.role==='player'){
     const a=e.myAttendance||{};
+    const closed=isDeadlineClosed(e);
     return `<div class="attendance-card"><h4>出欠回答（必須）</h4><div class="status">回答期限：${esc(deadline||'設定なし')}</div>
       <div class="attendance-buttons">
-        ${['出席','遅刻','欠席'].map(s=>`<button type="button" class="btn ${a.status===s?'selected':''}" data-att-status="${s}">${s}</button>`).join('')}
+        ${['出席','遅刻','欠席'].map(s=>`<button type="button" class="btn ${a.status===s?'selected':''}" data-att-status="${s}" ${closed?'disabled':''}>${s}</button>`).join('')}
       </div>
       <div id="attendanceExtra" class="attendance-reason"></div>
-      <div id="attendanceStatus" class="status">${a.status?'現在の回答：'+esc(a.status):'まだ回答していません。'}</div>
+      <div id="attendanceStatus" class="status ${closed?'error':''}">${closed?'回答期限が終了しています。':(a.status?'現在の回答：'+esc(a.status):'まだ回答していません。')}</div>
     </div>`;
   }
   return `<div class="attendance-card"><h4>出欠状況</h4><div class="status">回答期限：${esc(deadline||'設定なし')}</div><div id="attendanceSummary" class="status">読み込み中…</div></div>`;
@@ -376,6 +404,7 @@ function renderAttendancePanel(e){
 function bindAttendancePanel(e){
   if(!e.attendanceEnabled)return;
   if(state.role==='player'){
+    if(isDeadlineClosed(e))return;
     document.querySelectorAll('[data-att-status]').forEach(b=>b.addEventListener('click',()=>showAttendanceForm(b.dataset.attStatus,e.myAttendance||{})));
   }else {
     const box=$('attendanceSummary');
@@ -605,9 +634,9 @@ function renderCalendar(){
     const events=filteredEventsForDate(date);
     html+=`<div class="day ${key!==state.month?'out':''} ${date===todayKey()?'today':''} ${date===state.selectedDate?'selected':''} ${events.length?'has-events':''}" data-date="${date}">
       <div class="dayhead"><span class="daynum">${d.getDate()}</span>${state.role==='coach'?`<button class="addmini" data-add="${date}" aria-label="予定追加">＋</button>`:''}</div>
-      ${events.slice(0,2).map(e=>`<button class="event" style="background:${esc(e.color||typeDef(e.type).color)}" data-id="${esc(e.scheduleId)}">
-        <span class="cats">${esc(categoriesText(e))}</span><span class="kind">${esc(e.type||'予定')}${e.attendanceEnabled?'<span class="attendance-badge">出欠</span>':''}</span></button>`).join('')}
-      ${events.length>2?`<div class="more">＋${events.length-2}件</div>`:''}
+      ${events.slice(0,4).map(e=>`<button class="event compact-event" style="background:${esc(e.color||typeDef(e.type).color)}" data-id="${esc(e.scheduleId)}" title="${esc(compactEventLabel(e))}">
+        <span class="kind">${esc(compactEventLabel(e))}${e.attendanceEnabled?'<span class="attendance-badge">出欠</span>':''}</span></button>`).join('')}
+      ${events.length>4?`<div class="more">＋${events.length-4}件</div>`:''}
     </div>`;
   }
   el.calendar.innerHTML=html;
@@ -644,15 +673,14 @@ async function saveEvent(){
       title:$('title').value.trim(),location:$('location').value.trim(),
       allDay:$('allDay').checked,startTime:$('startTime').value,endTime:$('endTime').value,
       note:$('note').value.trim(),attendanceEnabled:$('attendanceEnabled').checked,
-      deadlineDays:$('deadlineDays').value,deadlineTime:$('deadlineTime').value
+      deadlineDate:$('deadlineDate').value,deadlineTime:$('deadlineTime').value
     };
     $('saveBtn').disabled=true;showStatus(el.modalStatus,'保存中…');
     const res=assertOk(await jsonp('save',data));
     if(!res.event)throw new Error('保存後の予定データを取得できませんでした。');
-    saveEventToLocalMonths(res.event);
     const targetMonth=res.event.date.slice(0,7);
     closeModal();
-    if(state.month!==targetMonth)await loadMonth(targetMonth);
+    await loadMonth(targetMonth,{force:true});
     toast('保存しました。');
   }catch(e){showStatus(el.modalStatus,e.message,'error')}finally{$('saveBtn').disabled=false}
 }
