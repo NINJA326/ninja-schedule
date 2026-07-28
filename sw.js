@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'ninja-schedule-maintenance-v6';
+const CACHE_NAME = 'ninja-schedule-maintenance-v6-1';
 const STATIC_FILES = ['./manifest.json'];
 
 self.addEventListener('install', event => {
