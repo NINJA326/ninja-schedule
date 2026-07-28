@@ -88,7 +88,7 @@
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
-  <script src="./config.js?v=9.2.0"></script>
+  <script src="./config.js?v=9.3.0"></script>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
@@ -104,7 +104,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.2-player</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.3-player</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">読込</button>
@@ -454,7 +454,7 @@ async function initPlayerLogin(){
     await liff.init({liffId:state.liffId,withLoginOnExternalBrowser:true});
 
     if(!liff.isLoggedIn()){
-      liff.login({redirectUri:location.origin+location.pathname+'?mode=player&v=9.2'});
+      liff.login({redirectUri:location.origin+location.pathname+'?mode=player&v=9.3'});
       return;
     }
 
@@ -480,7 +480,7 @@ function applyLogin(res){
   $('sheetBtn').classList.remove('hidden');
   $('roleBadge').textContent=(state.player?.playerName||'選手')+' / '+(state.player?.category||'');
 }
-function monthCacheKey(month){return 'ninjaScheduleMonthV9:'+month}
+function monthCacheKey(month){return 'ninjaScheduleMonthV9_3:'+month}
 function readMonthCache(month){
   try{
     const raw=localStorage.getItem(monthCacheKey(month));
@@ -489,12 +489,8 @@ function readMonthCache(month){
     return data&&Array.isArray(data.events)?data:null;
   }catch(e){return null}
 }
-function writeMonthCache(month,events,sourceUrl='',version=''){
-  try{
-    localStorage.setItem(monthCacheKey(month),JSON.stringify({
-      savedAt:Date.now(),events,sourceUrl:sourceUrl||'',version:String(version||'')
-    }));
-  }catch(e){}
+function writeMonthCache(month,events,sourceUrl=''){
+  try{localStorage.setItem(monthCacheKey(month),JSON.stringify({savedAt:Date.now(),events,sourceUrl:sourceUrl||''}))}catch(e){}
 }
 function sortEvents(events){
   return [...events].sort((a,b)=>(a.date||'').localeCompare(b.date||'')||(a.startTime||'').localeCompare(b.startTime||'')||(a.title||'').localeCompare(b.title||''));
@@ -503,7 +499,7 @@ function removeEventFromAllLocalMonths(scheduleId){
   if(!scheduleId)return;
   for(let i=localStorage.length-1;i>=0;i--){
     const key=localStorage.key(i)||'';
-    if(!key.startsWith('ninjaScheduleMonthV9:'))continue;
+    if(!key.startsWith('ninjaScheduleMonthV9_3:'))continue;
     try{
       const data=JSON.parse(localStorage.getItem(key)||'{}');
       if(!Array.isArray(data.events))continue;
@@ -518,13 +514,13 @@ function saveEventToLocalMonths(event){
   const month=event.date.slice(0,7);
   const cached=readMonthCache(month)||{events:[],sourceUrl:''};
   cached.events=sortEvents([...(cached.events||[]),event]);
-  writeMonthCache(month,cached.events,cached.sourceUrl||'',cached.version||'');
+  writeMonthCache(month,cached.events,cached.sourceUrl||'');
   if(state.month===month){state.events=cached.events;state.sourceUrl=cached.sourceUrl||'';renderCalendar();}
 }
 function removeLocalEvent(scheduleId){
   removeEventFromAllLocalMonths(scheduleId);
   state.events=state.events.filter(x=>x.scheduleId!==scheduleId);
-  writeMonthCache(state.month,state.events,state.sourceUrl,state.dataVersion||'');
+  writeMonthCache(state.month,state.events,state.sourceUrl);
   renderCalendar();
 }
 async function loadMonth(month,{force=false}={}){
@@ -532,34 +528,14 @@ async function loadMonth(month,{force=false}={}){
   const cached=readMonthCache(month);
   state.events=cached&&Array.isArray(cached.events)?cached.events:[];
   state.sourceUrl=cached?.sourceUrl||'';
-  state.dataVersion=String(cached?.version||'');
   renderCalendar();
 
-  if(force){
-    await fetchMonthOnce(month,{manual:true});
-    return;
+  if(cached&&!force){
+    showStatus(el.status,`${month.replace('-','.')} の保存データを表示し、最新予定を確認しています。`,'ok');
   }
 
-  if(!cached){
-    await fetchMonthOnce(month,{manual:false});
-    return;
-  }
-
-  showStatus(el.status,`${month.replace('-','.')} の更新を確認しています…`);
-  try{
-    const versionRes=assertOk(await jsonp('monthVersion',{token:state.token,month},12000));
-    const serverVersion=String(versionRes.version||'');
-    if(state.month!==month)return;
-    if(!serverVersion||serverVersion!==String(cached.version||'')){
-      await fetchMonthOnce(month,{manual:false});
-      return;
-    }
-    state.dataVersion=serverVersion;
-    showStatus(el.status,`${month.replace('-','.')} は最新です。`,'ok');
-  }catch(e){
-    showStatus(el.status,`${month.replace('-','.')} を端末保存データから表示しています。`,'ok');
-    if(/ログイン/.test(e.message))logout(false);
-  }
+  // 選手版は月を開くたびに最新予定を確認します。
+  await fetchMonthOnce(month,{manual:force});
 }
 async function fetchMonthOnce(month,{manual=false}={}){
   if(state.loadingMonth)return;
@@ -567,12 +543,11 @@ async function fetchMonthOnce(month,{manual=false}={}){
   if($('sheetBtn'))$('sheetBtn').disabled=true;
   showStatus(el.status,manual?'現在の月を読み込んでいます…':'初回データを読み込んでいます…');
   try{
-    const res=assertOk(await jsonp('events',{token:state.token,month},25000));
+    const res=assertOk(await jsonp('events',{token:state.token,month,force:'1'},25000));
     if(state.month!==month)return;
     state.events=sortEvents(res.events||[]);
     state.sourceUrl=res.sourceUrl||'';
-    state.dataVersion=String(res.version||'');
-    writeMonthCache(month,state.events,state.sourceUrl,state.dataVersion);
+    writeMonthCache(month,state.events,state.sourceUrl);
     renderCalendar();
     showStatus(el.status,`${month.replace('-','.')} を読み込みました。`,'ok');
     if(manual)toast('予定を読み込みました。');
@@ -810,7 +785,7 @@ function logout(callApi=true){
   $('bootMessage').textContent='LINE選手認証を確認しています…';
   showStatus($('lineLoginStatus'),'');
   if(typeof liff!=='undefined'&&liff.isLoggedIn())liff.logout();
-  location.replace(location.origin+location.pathname+'?mode=player&v=9.2');
+  location.replace(location.origin+location.pathname+'?mode=player&v=9.3');
 }
 function enableMonthSwipe(){
   const target=document.querySelector('.calendar-wrap');
@@ -862,12 +837,12 @@ async function init(){
   if('caches' in window){
     try{
       const keys=await caches.keys();
-      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v9-2').map(k=>caches.delete(k)));
+      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v9-3').map(k=>caches.delete(k)));
     }catch(e){}
   }
   if('serviceWorker' in navigator){
     try{
-      const reg=await navigator.serviceWorker.register('./sw.js?v=9.2.0');
+      const reg=await navigator.serviceWorker.register('./sw.js?v=9.3.0');
       reg.update().catch(()=>{});
     }catch(e){}
   }
