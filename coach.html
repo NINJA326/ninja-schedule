@@ -68,6 +68,21 @@
     .summary-count{background:#13243b;border-radius:8px;padding:8px 4px;text-align:center;font-size:11px}
     .summary-count strong{display:block;font-size:18px}
     .attendance-row{padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}
+    .attendance-roster{display:grid;gap:7px;margin-top:10px}
+    .attendance-person{border:1px solid var(--line);border-radius:10px;background:#0d1b2e;overflow:hidden}
+    .attendance-person-main{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;border:0;background:transparent;color:var(--text);padding:10px 11px;text-align:left;cursor:default}
+    .attendance-person-main.expandable{cursor:pointer}
+    .attendance-person-name{min-width:0;font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .attendance-person-category{display:block;margin-top:2px;color:var(--muted);font-size:10px;font-weight:600}
+    .attendance-status-pill{min-width:58px;text-align:center;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:900}
+    .attendance-status-pill.present{background:#14532d;color:#bbf7d0}
+    .attendance-status-pill.late{background:#713f12;color:#fde68a}
+    .attendance-status-pill.absent{background:#7f1d1d;color:#fecaca}
+    .attendance-status-pill.unanswered{background:#334155;color:#e2e8f0}
+    .attendance-chevron{width:18px;color:var(--muted);font-size:13px;text-align:center}
+    .attendance-person-detail{display:none;border-top:1px solid var(--line);padding:10px 12px;background:#09182a;font-size:12px;line-height:1.7}
+    .attendance-person.open .attendance-person-detail{display:block}
+    .attendance-detail-label{color:var(--muted);font-weight:800;margin-right:6px}
     .category-filter{min-width:118px;max-width:160px;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;padding:7px 8px;min-height:36px;font-weight:700}
     .color-picker-wrap{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
     .color-picker-wrap input[type=color]{width:58px;height:44px;padding:3px;border:1px solid var(--line);border-radius:9px;background:#071425;cursor:pointer}
@@ -88,7 +103,7 @@
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
-  <script src="./config.js?v=9.4.0"></script>
+  <script src="./config.js?v=9.5.0"></script>
 </head>
 <body>
   <section id="loginView" class="login">
@@ -105,7 +120,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ コーチ専用</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.4-coach</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ コーチ専用</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.5-coach</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">読込</button>
@@ -380,7 +395,10 @@ function bindAttendancePanel(e){
     document.querySelectorAll('[data-att-status]').forEach(b=>b.addEventListener('click',()=>showAttendanceForm(b.dataset.attStatus,e.myAttendance||{})));
   }else {
     const box=$('attendanceSummary');
-    if(box)box.textContent='出欠状況は選手の保存後に反映されます。必要時のみ「読込」を使用してください。';
+    if(box){
+      box.textContent='対象選手の出欠名簿を読み込んでいます…';
+      loadAttendanceSummary(e.scheduleId);
+    }
   }
 }
 function showAttendanceForm(status,current={}){
@@ -425,13 +443,41 @@ async function saveAttendance(status){
     if(button&&document.body.contains(button))button.disabled=false;
   }
 }
+function attendanceStatusClass(status){
+  return status==='出席'?'present':status==='遅刻'?'late':status==='欠席'?'absent':'unanswered';
+}
+function renderAttendanceRosterRow(row,index){
+  const expandable=(row.status==='遅刻'||row.status==='欠席')&&Boolean(row.reason||row.arrivalTime||row.updatedAt);
+  const detail=[];
+  if(row.status==='遅刻'&&row.arrivalTime)detail.push(`<div><span class="attendance-detail-label">到着予定</span>${esc(row.arrivalTime)}</div>`);
+  if(row.reason)detail.push(`<div><span class="attendance-detail-label">理由</span>${esc(row.reason)}</div>`);
+  if(row.updatedAt)detail.push(`<div><span class="attendance-detail-label">回答更新</span>${esc(row.updatedAt)}</div>`);
+  return `<div class="attendance-person" data-attendance-person="${index}">
+    <button type="button" class="attendance-person-main ${expandable?'expandable':''}" ${expandable?`data-attendance-toggle="${index}" aria-expanded="false"`:''}>
+      <span class="attendance-person-name">${esc(row.playerName||'名前未登録')}<span class="attendance-person-category">${esc(row.category||'カテゴリー未登録')}</span></span>
+      <span class="attendance-status-pill ${attendanceStatusClass(row.status)}">${esc(row.status||'未回答')}</span>
+      <span class="attendance-chevron">${expandable?'▼':''}</span>
+    </button>
+    ${expandable?`<div class="attendance-person-detail">${detail.join('')}</div>`:''}
+  </div>`;
+}
 async function loadAttendanceSummary(scheduleId){
+  const box=$('attendanceSummary');
+  if(!box)return;
   try{
-    const res=assertOk(await jsonp('attendanceSummary',{token:state.token,scheduleId}));
-    const c=res.counts||{},rows=res.rows||[];
-    $('attendanceSummary').innerHTML=`<div class="summary-counts">${['出席','遅刻','欠席','未回答'].map(s=>`<div class="summary-count"><strong>${c[s]||0}</strong>${s}</div>`).join('')}</div>
-      <div style="margin-top:10px">${rows.map(r=>`<div class="attendance-row"><strong>${esc(r.playerName)}</strong>　${esc(r.status)}${r.arrivalTime?'（'+esc(r.arrivalTime)+'）':''}${r.reason?'<br>'+esc(r.reason):''}</div>`).join('')||'<div class="status">対象選手がいません。</div>'}</div>`;
-  }catch(e){showStatus($('attendanceSummary'),e.message,'error')}
+    const res=assertOk(await jsonp('attendanceSummary',{token:state.token,scheduleId},45000));
+    const c=res.counts||{},rows=Array.isArray(res.rows)?res.rows:[];
+    box.innerHTML=`<div class="summary-counts">${['出席','遅刻','欠席','未回答'].map(s=>`<div class="summary-count"><strong>${c[s]||0}</strong>${s}</div>`).join('')}</div>
+      <div class="attendance-roster">${rows.map(renderAttendanceRosterRow).join('')||'<div class="status">対象カテゴリーの選手が登録されていません。</div>'}</div>`;
+    box.querySelectorAll('[data-attendance-toggle]').forEach(button=>button.addEventListener('click',()=>{
+      const person=button.closest('.attendance-person');
+      if(!person)return;
+      const opened=person.classList.toggle('open');
+      button.setAttribute('aria-expanded',String(opened));
+      const arrow=button.querySelector('.attendance-chevron');
+      if(arrow)arrow.textContent=opened?'▲':'▼';
+    }));
+  }catch(e){showStatus(box,e.message,'error')}
 }
 function toggleDeadline(){$('deadlineFields').classList.toggle('hidden',!$('attendanceEnabled').checked)}
 
@@ -467,7 +513,7 @@ async function login(){
     await loadMonth(monthKey(new Date()));
   }catch(e){showStatus(el.loginStatus,e.message,'error')}
 }
-function monthCacheKey(month){return 'ninjaScheduleMonthV9_4:'+month}
+function monthCacheKey(month){return 'ninjaScheduleMonthV9_5:'+month}
 function readMonthCache(month){
   try{
     const raw=localStorage.getItem(monthCacheKey(month));
@@ -486,7 +532,7 @@ function removeEventFromAllLocalMonths(scheduleId){
   if(!scheduleId)return;
   for(let i=localStorage.length-1;i>=0;i--){
     const key=localStorage.key(i)||'';
-    if(!key.startsWith('ninjaScheduleMonthV9_4:'))continue;
+    if(!key.startsWith('ninjaScheduleMonthV9_5:'))continue;
     try{
       const data=JSON.parse(localStorage.getItem(key)||'{}');
       if(!Array.isArray(data.events))continue;
@@ -797,12 +843,12 @@ async function init(){
   if('caches' in window){
     try{
       const keys=await caches.keys();
-      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v9-4').map(k=>caches.delete(k)));
+      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v9-5').map(k=>caches.delete(k)));
     }catch(e){}
   }
   if('serviceWorker' in navigator){
     try{
-      const reg=await navigator.serviceWorker.register('./sw.js?v=9.4.0');
+      const reg=await navigator.serviceWorker.register('./sw.js?v=9.5.0');
       reg.update().catch(()=>{});
     }catch(e){}
   }
