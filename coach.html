@@ -245,6 +245,8 @@ const state={
   currentEvent:null,
   selectedDate:'',
   categoryFilter:'ALL',
+  growthPlayerName:'',
+  growthRecord:null,
   mode:'detail',
   loadingMonth:false,
   dataVersion:''
@@ -277,6 +279,13 @@ function assertOk(res){if(!res||res.status!=='ok')throw new Error(res&&res.messa
 function esc(v){return String(v??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]))}
 function showStatus(target,msg,type=''){target.textContent=msg||'';target.className='status'+(type?' '+type:'')}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}
+function persistSession(token,role='coach',player=null){
+  state.token=String(token||'');
+  state.role=String(role||'coach');
+  state.player=player||null;
+  if(state.token){sessionStorage.setItem('scheduleToken',state.token);sessionStorage.setItem('scheduleRole',state.role);}else{sessionStorage.removeItem('scheduleToken');sessionStorage.removeItem('scheduleRole');}
+}
+function clearSession(){persistSession('','',null)}
 function monthKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}
 function localDateKey(d=new Date()){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function todayKey(){return localDateKey(new Date())}
@@ -373,6 +382,15 @@ function renderDetail(e){
     </dl>
     <div id="attendancePanel">${renderAttendancePanel(e)}</div>
     <div class="field" style="margin-top:18px">
+      <label>成長記録</label>
+      <div class="upload-row">
+        <input id="growthPlayerInput" type="text" value="${esc(state.growthPlayerName||'')}" placeholder="選手名を入力">
+        <button id="growthLoadBtn" type="button" class="btn primary">表示</button>
+      </div>
+      <div id="growthRecordStatus" class="status"></div>
+      <div id="growthRecordCard">${renderGrowthRecordCard(state.growthRecord)}</div>
+    </div>
+    <div class="field" style="margin-top:18px">
       <label>写真・ファイル添付</label>
       <div class="upload-row" id="uploadRow">
         <input id="attachmentInput" type="file" accept="image/jpeg,image/png,application/pdf,.doc,.docx,.xls,.xlsx">
@@ -384,6 +402,8 @@ function renderDetail(e){
   bindAttendancePanel(e);
   if(state.role==='player') $('uploadRow').classList.add('hidden');
   $('uploadBtn').addEventListener('click',uploadAttachment);
+  $('growthLoadBtn').addEventListener('click',()=>loadGrowthRecord($('growthPlayerInput').value));
+  $('growthPlayerInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadGrowthRecord($('growthPlayerInput').value);}});
   el.detailView.querySelectorAll('[data-open-attachment]').forEach(btn=>btn.addEventListener('click',()=>openAttachment(btn.dataset.openAttachment)));
   el.detailView.querySelectorAll('[data-delete-attachment]').forEach(btn=>btn.addEventListener('click',()=>deleteAttachment(btn.dataset.deleteAttachment)));
   setMode('detail');
@@ -511,14 +531,89 @@ async function loadAttendanceSummary(scheduleId){
 function toggleDeadline(){$('deadlineFields').classList.toggle('hidden',!$('attendanceEnabled').checked)}
 
 function formatBytes(n){n=Number(n)||0;if(n<1024)return n+'B';if(n<1048576)return (n/1024).toFixed(1)+'KB';return (n/1048576).toFixed(1)+'MB'}
+function pickGrowthValue(record,keys){for(const key of keys){const value=record?.[key];if(value!==undefined&&value!==null&&String(value).trim()!=='')return value;}return ''}
+function normalizeGrowthRecord(res){
+  const payload=res?.record||res?.growthRecord||res?.data||res;
+  if(!payload||typeof payload!=='object')return null;
+  const record=Array.isArray(payload)?payload[0]:payload;
+  if(!record||typeof record!=='object')return null;
+  return {
+    shooting:pickGrowthValue(record,['shooting','shoot','shot','shotting','shootingScore']),
+    height:pickGrowthValue(record,['height','heightCm','height_cm','heightInCm']),
+    weight:pickGrowthValue(record,['weight','weightKg','weight_kg','bodyWeight']),
+    agility:pickGrowthValue(record,['agility','agilityScore','agilityTime','agilitySec'])
+  };
+}
+function renderGrowthRecordCard(record,errorMsg=''){
+  if(errorMsg){return `<div class="attendance-card"><h4>成長記録</h4><div class="status error">${esc(errorMsg)}</div></div>`;}
+  if(!record){return `<div class="attendance-card"><h4>成長記録</h4><div class="status">選手名を入力して表示してください。</div></div>`;}
+  const items=[
+    ['シュート',record.shooting],
+    ['身長',record.height],
+    ['体重',record.weight],
+    ['敏捷性',record.agility]
+  ].filter(([,value])=>value!=='' && value!==undefined && value!==null);
+  if(!items.length){return `<div class="attendance-card"><h4>成長記録</h4><div class="status">成長記録データが見つかりませんでした。</div></div>`;}
+  return `<div class="attendance-card"><h4>成長記録</h4><div class="summary-counts">${items.map(([label,value])=>`<div class="summary-count"><strong>${esc(String(value))}</strong>${esc(label)}</div>`).join('')}</div></div>`;
+}
+async function loadGrowthRecord(playerName){
+  const name=(playerName||'').trim();
+  const status=$('growthRecordStatus');
+  const card=$('growthRecordCard');
+  if(!name){showStatus(status,'選手名を入力してください。','error');card.innerHTML=renderGrowthRecordCard(null);return;}
+  state.growthPlayerName=name;
+  showStatus(status,'成長記録を読み込んでいます…');
+  card.innerHTML=renderGrowthRecordCard(null);
+  try{
+    const candidates=[
+      {action:'growthRecord',params:{playerName:name}},
+      {action:'growthRecord',params:{player:name}},
+      {action:'growthRecord',params:{name}},
+      {action:'getGrowthRecord',params:{playerName:name}},
+      {action:'getGrowthRecord',params:{player:name}},
+      {action:'growthRecords',params:{playerName:name}},
+      {action:'growthRecords',params:{player:name}}
+    ];
+    let lastError=null;
+    let res=null;
+    for(const candidate of candidates){
+      try{
+        res=assertOk(await jsonp(candidate.action,{token:state.token,...candidate.params},45000));
+        break;
+      }catch(e){lastError=e;}
+    }
+    if(!res)throw lastError||new Error('成長記録APIに接続できませんでした。');
+    const record=normalizeGrowthRecord(res);
+    if(!record)throw new Error('成長記録データを取得できませんでした。');
+    state.growthRecord=record;
+    card.innerHTML=renderGrowthRecordCard(record);
+    showStatus(status,'成長記録を表示しました。','ok');
+  }catch(e){
+    state.growthRecord=null;
+    card.innerHTML=renderGrowthRecordCard(null,e.message);
+    showStatus(status,e.message,'error');
+  }
+}
 
 async function initCoachLogin(){
   state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');
-  state.token='';
-  state.role='';
-  state.player=null;
-  sessionStorage.removeItem('scheduleToken');
-  sessionStorage.removeItem('scheduleRole');
+  if(!state.apiUrl){const saved=localStorage.getItem('scheduleApiUrl')||'';if(saved){state.apiUrl=saved;el.apiUrl.value=saved;}}
+  el.apiUrl.value=state.apiUrl;
+
+  if(state.token){
+    state.role=state.role||'coach';
+    el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');
+    el.loginBtn.classList.add('hidden');
+    el.password.closest('.field').classList.add('hidden');
+    $('newBtn').classList.toggle('hidden',state.role!=='coach');
+    $('sheetBtn').classList.toggle('hidden',state.role!=='coach');
+    $('roleBadge').textContent='コーチ';
+    showStatus($('lineLoginStatus'),'前回のセッションを復元しました。');
+    await loadMonth(monthKey(new Date()));
+    return true;
+  }
+
+  clearSession();
   el.password.value='';
   el.loginBtn.classList.remove('hidden');
   el.password.closest('.field').classList.remove('hidden');
@@ -526,12 +621,11 @@ async function initCoachLogin(){
   return false;
 }
 function applyLogin(res){
-  state.token=res.token;state.role=res.role||'coach';state.player=res.player||null;
-  sessionStorage.setItem('scheduleToken',state.token);sessionStorage.setItem('scheduleRole',state.role);
+  persistSession(res.token,res.role||'coach',res.player||null);
   el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');
   $('newBtn').classList.toggle('hidden',state.role!=='coach');
   $('sheetBtn').classList.toggle('hidden',state.role!=='coach');
-  $('roleBadge').textContent=state.role==='player'?(state.player?.playerName||'選手')+' / '+(state.player?.category||''):'コーチ';
+  $('roleBadge').textContent='コーチ';
 }
 async function login(){
   try{
@@ -836,7 +930,7 @@ async function deleteAttachment(id){
   }catch(e){toast(e.message)}
 }
 function shiftMonth(diff){const [y,m]=state.month.split('-').map(Number);loadMonth(monthKey(new Date(y,m-1+diff,1)))}
-function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});state.token='';state.role='';state.player=null;sessionStorage.removeItem('scheduleToken');sessionStorage.removeItem('scheduleRole');el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');showStatus(el.loginStatus,'')}
+function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});clearSession();el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');el.loginBtn.classList.remove('hidden');el.password.closest('.field').classList.remove('hidden');el.password.value='';showStatus(el.loginStatus,'');showStatus($('lineLoginStatus'),'コーチはパスワードでログインしてください。')}
 function enableMonthSwipe(){
   const target=document.querySelector('.calendar-wrap');
   let startX=0,startY=0,tracking=false;
