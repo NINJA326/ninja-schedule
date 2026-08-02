@@ -288,7 +288,57 @@ function jsonp(action,params={},timeoutMs=25000){
     document.body.appendChild(script);
   });
 }
-function assertOk(res){if(!res||res.status!=='ok')throw new Error(res&&res.message?res.message:'処理に失敗しました。');return res}
+function assertOk(res){
+  const payload = res && typeof res === 'object' ? res : {};
+  const isOk = payload.status === 'ok' || payload.success === true || payload.ok === true;
+  if(!isOk) throw new Error(payload.message || '処理に失敗しました。');
+  return payload.data !== undefined ? payload.data : payload;
+}
+function normalizeSchedulePayload(payload){
+  if(!payload || typeof payload !== 'object') return null;
+  if(Array.isArray(payload))return payload[0]||null;
+  if(payload.schedule)return payload.schedule;
+  if(payload.item)return payload.item;
+  if(payload.event)return payload.event;
+  if(payload.data && typeof payload.data === 'object'){
+    return payload.data.schedule || payload.data.item || payload.data.event || payload.data;
+  }
+  return payload;
+}
+function normalizeScheduleList(payload){
+  if(!payload || typeof payload !== 'object') return [];
+  if(Array.isArray(payload))return payload;
+  if(Array.isArray(payload.schedules))return payload.schedules;
+  if(Array.isArray(payload.items))return payload.items;
+  if(Array.isArray(payload.events))return payload.events;
+  if(payload.data && typeof payload.data === 'object'){
+    if(Array.isArray(payload.data.schedules))return payload.data.schedules;
+    if(Array.isArray(payload.data.items))return payload.data.items;
+    if(Array.isArray(payload.data.events))return payload.data.events;
+  }
+  return [];
+}
+function normalizeAttendanceRows(payload){
+  const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  const rows = Array.isArray(data?.rows) ? data.rows : Array.isArray(data?.items) ? data.items : [];
+  const counts = data?.counts || data?.summary || {};
+  return {rows, counts};
+}
+function normalizeAttachmentList(payload){
+  const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  if(Array.isArray(data?.attachments))return data.attachments;
+  if(Array.isArray(data?.items))return data.items;
+  if(Array.isArray(data))return data;
+  return [];
+}
+function normalizeCoachPayload(payload){
+  const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  return {
+    token:String(data?.token || data?.sessionToken || data?.accessToken || ''),
+    role:String(data?.role || data?.userRole || 'coach'),
+    player:data?.player || data?.user || null
+  };
+}
 function esc(v){return String(v??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]))}
 function showStatus(target,msg,type=''){target.textContent=msg||'';target.className='status'+(type?' '+type:'')}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}
@@ -431,7 +481,10 @@ function renderDetail(e){
   bindAttendancePanel(e);
   if(state.role==='player') $('uploadRow').classList.add('hidden');
   $('uploadBtn').addEventListener('click',uploadAttachment);
-  el.detailView.querySelectorAll('[data-open-attachment]').forEach(btn=>btn.addEventListener('click',()=>openAttachment(btn.dataset.openAttachment)));
+  el.detailView.querySelectorAll('[data-attachment-id]').forEach(btn=>btn.addEventListener('click',()=>{
+    const target=attachments.find(a=>String(a.attachmentId)===String(btn.dataset.attachmentId));
+    if(target)openAttachment(target);
+  }));
   el.detailView.querySelectorAll('[data-delete-attachment]').forEach(btn=>btn.addEventListener('click',()=>deleteAttachment(btn.dataset.deleteAttachment)));
   setMode('detail');
   el.detailFoot.querySelector('#editBtn').classList.toggle('hidden',state.role!=='coach');
@@ -444,7 +497,7 @@ function renderAttachments(items){
   return items.map(a=>{
     const isImg=String(a.mimeType||'').startsWith('image/');
     const thumb=isImg?`<div class="attachment-thumb" style="display:grid;place-items:center">画像</div>`:`<div class="attachment-thumb" style="display:grid;place-items:center">FILE</div>`;
-    return `<div class="attachment">${thumb}<div class="attachment-info"><div class="attachment-name">${esc(a.fileName)}</div><div class="attachment-meta">${esc(a.mimeType||'')} / ${formatBytes(a.size||0)}</div></div><button class="btn" style="padding:5px 7px;min-height:30px" data-open-attachment="${esc(a.attachmentId)}">見る</button>${state.role==='coach'?`<button class="btn danger" style="padding:5px 7px;min-height:30px" data-delete-attachment="${esc(a.attachmentId)}">削除</button>`:''}</div>`;
+    return `<div class="attachment">${thumb}<div class="attachment-info"><div class="attachment-name">${esc(a.fileName)}</div><div class="attachment-meta">${esc(a.mimeType||'')} / ${formatBytes(a.size||0)}</div></div><button class="btn" style="padding:5px 7px;min-height:30px" data-attachment-id="${esc(a.attachmentId||'')}">見る</button>${state.role==='coach'?`<button class="btn danger" style="padding:5px 7px;min-height:30px" data-delete-attachment="${esc(a.attachmentId||'')}">削除</button>`:''}</div>`;
   }).join('');
 }
 
@@ -499,15 +552,16 @@ async function saveAttendance(status){
     if((status==='遅刻'||status==='欠席')&&!reason)throw new Error(status+'理由を入力してください。');
     if(button)button.disabled=true;
     showStatus($('attendanceStatus'),'登録中…');
-    const res=assertOk(await jsonp('saveAttendance',{
+    const payload=assertOk(await jsonp('attendance.save',{ 
       token:state.token,
       scheduleId:String(state.currentEvent.scheduleId),
       status,
       arrivalTime:arrival,
       reason
     },45000));
-    if(!res.attendance)throw new Error('登録結果を確認できませんでした。');
-    state.currentEvent={...state.currentEvent,myAttendance:res.attendance};
+    const attendance = payload?.attendance || payload?.item || payload?.row || payload;
+    if(!attendance)throw new Error('登録結果を確認できませんでした。');
+    state.currentEvent={...state.currentEvent,myAttendance:attendance};
     saveEventToLocalMonths(state.currentEvent);
     renderDetail(state.currentEvent);
     toast('出欠を登録しました。');
@@ -541,67 +595,55 @@ async function loadAttendanceSummary(scheduleId){
   const box=$('attendanceSummary');
   if(!box)return;
   try{
-    const res=assertOk(await jsonp('attendanceSummary',{token:state.token,scheduleId},45000));
-    const c=res.counts||{},rows=Array.isArray(res.rows)?res.rows:[];
-    box.innerHTML=`<div class="summary-counts">${['出席','遅刻','欠席','未回答'].map(s=>`<div class="summary-count"><strong>${c[s]||0}</strong>${s}</div>`).join('')}</div>
-      <div class="attendance-roster">${rows.map(renderAttendanceRosterRow).join('')||'<div class="status">対象カテゴリーの選手が登録されていません。</div>'}</div>`;
-    box.querySelectorAll('[data-attendance-toggle]').forEach(button=>button.addEventListener('click',()=>{
-      const person=button.closest('.attendance-person');
-      if(!person)return;
-      const opened=person.classList.toggle('open');
-      button.setAttribute('aria-expanded',String(opened));
-      const arrow=button.querySelector('.attendance-chevron');
-      if(arrow)arrow.textContent=opened?'▲':'▼';
-    }));
+    const payload=assertOk(await jsonp('attendance.getSummary',{token:state.token,scheduleId},45000));
+    const {counts,rows}=normalizeAttendanceRows(payload);
+    box.innerHTML=`<div class="summary-counts">${['出席','遅刻','欠席','未回答'].map(s=>`<div class="summary-count"><strong>${counts[s]||0}</strong>${s}</div>`).join('')}</div>
+      <div style="margin-top:10px">${rows.map(row=>`<div class="attendance-row"><strong>${esc(row.playerName||'未登録')}</strong>　${esc(row.status||'未回答')}${row.arrivalTime?'（'+esc(row.arrivalTime)+'）':''}${row.reason?'<br>'+esc(row.reason):''}</div>`).join('')||'<div class="status">対象選手がいません。</div>'}</div>`;
   }catch(e){showStatus(box,e.message,'error')}
 }
-function toggleDeadline(){$('deadlineFields').classList.toggle('hidden',!$('attendanceEnabled').checked)}
-
-function formatBytes(n){n=Number(n)||0;if(n<1024)return n+'B';if(n<1048576)return (n/1024).toFixed(1)+'KB';return (n/1048576).toFixed(1)+'MB'}
-
-async function initCoachLogin(){
-  state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');
-  if(!state.apiUrl){const saved=localStorage.getItem('scheduleApiUrl')||'';if(saved){state.apiUrl=saved;el.apiUrl.value=saved;}}
-  el.apiUrl.value=state.apiUrl;
-
-  if(state.token){
-    state.role=state.role||'coach';
-    el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');
-    el.loginBtn.classList.add('hidden');
-    el.password.closest('.field').classList.add('hidden');
-    el.logoutBtn.classList.remove('hidden');
-    $('newBtn').classList.toggle('hidden',state.role!=='coach');
-    $('sheetBtn').classList.toggle('hidden',state.role!=='coach');
-    $('roleBadge').textContent='コーチ認証済み';
-    showStatus($('lineLoginStatus'),'コーチ認証済み');
-    await loadMonth(monthKey(new Date()));
-    return true;
-  }
-
-  clearSession();
-  el.password.value='';
-  el.loginBtn.classList.remove('hidden');
-  el.password.closest('.field').classList.remove('hidden');
-  el.logoutBtn.classList.add('hidden');
-  $('roleBadge').textContent='コーチログイン';
-  showStatus($('lineLoginStatus'),'コーチログイン');
-  return false;
-}
 function applyLogin(res){
-  persistSession(res.token,res.role||'coach',res.player||null);
-  el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');
-  $('newBtn').classList.toggle('hidden',state.role!=='coach');
-  $('sheetBtn').classList.toggle('hidden',state.role!=='coach');
-  el.logoutBtn.classList.remove('hidden');
-  $('roleBadge').textContent='コーチ認証済み';
+  const payload=normalizeCoachPayload(res);
+  if(!payload.token) throw new Error('コーチ認証情報を取得できませんでした。');
+  state.token=payload.token;
+  state.role=payload.role||'coach';
+  state.player=payload.player||null;
+  persistSession(state.token,state.role,state.player);
+  el.loginView.classList.add('hidden');
+  el.appView.classList.remove('hidden');
+  $('newBtn').classList.remove('hidden');
+  $('sheetBtn').classList.remove('hidden');
+  $('logoutBtn').classList.remove('hidden');
+  $('roleBadge').textContent=(state.player?.playerName||'コーチ')+' / '+(state.player?.category||'');
+  showStatus(el.loginStatus,'');
 }
 async function login(){
   try{
     showStatus(el.loginStatus,'接続中…');
     state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');localStorage.setItem('scheduleApiUrl',state.apiUrl);
-    const res=assertOk(await jsonp('login',{password:el.password.value}));
-    applyLogin(res);
+    const payload=assertOk(await jsonp('coach.app',{password:el.password.value}));
+    applyLogin(payload);
     await loadMonth(monthKey(new Date()));
+  }catch(e){showStatus(el.loginStatus,e.message,'error')}
+}
+async function initCoachLogin(){
+  try{
+    const savedToken=sessionStorage.getItem('scheduleToken');
+    const savedRole=sessionStorage.getItem('scheduleRole');
+    if(savedToken){
+      state.token=savedToken;
+      state.role=savedRole||'coach';
+      el.loginView.classList.add('hidden');
+      el.appView.classList.remove('hidden');
+      $('newBtn').classList.remove('hidden');
+      $('sheetBtn').classList.remove('hidden');
+      $('logoutBtn').classList.remove('hidden');
+      $('roleBadge').textContent='コーチログイン';
+      await loadMonth(monthKey(new Date()));
+      return;
+    }
+    el.appView.classList.add('hidden');
+    el.loginView.classList.remove('hidden');
+    showStatus(el.loginStatus,'');
   }catch(e){showStatus(el.loginStatus,e.message,'error')}
 }
 function monthCacheKey(month){return 'ninjaScheduleMonthV9_7:'+month}
@@ -658,7 +700,6 @@ async function loadMonth(month,{force=false}={}){
     showStatus(el.status,`${month.replace('-','.')} の保存データを表示し、最新予定を確認しています。`,'ok');
   }
 
-  // コーチ版・選手版の予定差を防ぐため、キャッシュがあっても毎回APIへ最新予定を確認する。
   await fetchMonthOnce(month,{manual:force});
 }
 async function fetchMonthOnce(month,{manual=false}={}){
@@ -667,10 +708,11 @@ async function fetchMonthOnce(month,{manual=false}={}){
   if($('sheetBtn'))$('sheetBtn').disabled=true;
   showStatus(el.status,manual?'現在の月を読み込んでいます…':'初回データを読み込んでいます…');
   try{
-    const res=assertOk(await jsonp('events',{token:state.token,month,force:'1'},25000));
+    const payload=assertOk(await jsonp('schedule.getByMonth',{token:state.token,month,force:'1'},25000));
     if(state.month!==month)return;
-    state.events=sortEvents(res.events||[]);
-    state.sourceUrl=res.sourceUrl||'';
+    const schedules=normalizeScheduleList(payload);
+    state.events=sortEvents(schedules);
+    state.sourceUrl=payload?.sourceUrl||payload?.source||'';
     writeMonthCache(month,state.events,state.sourceUrl);
     renderCalendar();
     showStatus(el.status,`${month.replace('-','.')} を読み込みました。`,'ok');
@@ -743,19 +785,23 @@ function renderCalendar(){
   el.calendar.querySelectorAll('[data-add]').forEach(b=>b.addEventListener('click',ev=>{ev.stopPropagation();state.selectedDate=b.dataset.add;renderCalendar();newEvent(b.dataset.add)}));
   el.calendar.querySelectorAll('[data-id]').forEach(b=>b.addEventListener('click',async ev=>{ev.stopPropagation();await openEvent(b.dataset.id)}));
 }
-function openEvent(scheduleId){
-  const event=state.events.find(e=>e.scheduleId===scheduleId);
-  if(!event){toast('端末に予定詳細がありません。「読込」を押してください。');return;}
-  const e={...event,attachments:Array.isArray(event.attachments)?event.attachments:[]};
-  state.selectedDate=e.date;
-  renderCalendar();
-  renderDetail(e);
+async function openEvent(scheduleId){
+  try{
+    const payload=assertOk(await jsonp('schedule.getById',{token:state.token,scheduleId},45000));
+    const event=normalizeSchedulePayload(payload);
+    if(!event){toast('予定詳細を取得できませんでした。');return;}
+    const attachments=await loadAttachmentsForSchedule(event.scheduleId);
+    const e={...event,attachments};
+    state.selectedDate=e.date;
+    renderCalendar();
+    renderDetail(e);
+  }catch(e){toast(e.message)}
 }
 function newEvent(date=todayKey()){
-  state.currentEvent=null;$('modalTitle').textContent='予定追加';fillForm({date,type:'練習',categories:[]});showStatus(el.modalStatus,'');setMode('edit');openModal()
+  state.copySourceId='';state.currentEvent=null;$('modalTitle').textContent='予定追加';fillForm({date,type:'練習',categories:[]});showStatus(el.modalStatus,'');setMode('edit');openModal()
 }
-function editCurrent(){if(!state.currentEvent)return;$('modalTitle').textContent='予定変更';fillForm(state.currentEvent);showStatus(el.modalStatus,'');setMode('edit')}
-function copyCurrent(){if(!state.currentEvent)return;const copy={...state.currentEvent,scheduleId:'',sourceRef:'',date:state.currentEvent.date};$('modalTitle').textContent='予定複写';fillForm(copy);showStatus(el.modalStatus,'');setMode('edit')}
+function editCurrent(){if(!state.currentEvent)return;state.copySourceId='';$('modalTitle').textContent='予定変更';fillForm(state.currentEvent);showStatus(el.modalStatus,'');setMode('edit')}
+function copyCurrent(){if(!state.currentEvent)return;state.copySourceId=state.currentEvent.scheduleId;const copy={...state.currentEvent,scheduleId:'',sourceRef:'',date:state.currentEvent.date};$('modalTitle').textContent='予定複写';fillForm(copy);showStatus(el.modalStatus,'');setMode('edit')}
 function toggleTimes(){$('timeFields').classList.toggle('hidden',$('allDay').checked)}
 async function saveEvent(){
   const button=$('saveBtn');
@@ -769,7 +815,6 @@ async function saveEvent(){
     const previousSourceRef=$('sourceRef').value;
     const dates=[primaryDate,...state.batchDates.filter(date=>date&&date!==primaryDate)];
     const baseData={
-      token:state.token,
       type:$('type').value,
       color:normalizeHexColor($('eventColor').value),
       categories:JSON.stringify(categories),
@@ -789,19 +834,22 @@ async function saveEvent(){
     closeModal();
     toast(dates.length>1?`${dates.length}件の保存を開始しました。`:'保存を開始しました。');
 
-    const tasks=dates.map((date,index)=>jsonp('save',{
-      ...baseData,
-      date,
-      scheduleId:index===0?previousId:'',
-      sourceRef:index===0?previousSourceRef:''
-    },60000));
+    const tasks=dates.map((date,index)=>{
+      if(state.copySourceId){
+        return jsonp('schedule.copy',{token:state.token,sourceScheduleId:state.copySourceId,date,...baseData},60000);
+      }
+      if(index===0&&previousId){
+        return jsonp('schedule.update',{token:state.token,scheduleId:previousId,sourceRef:previousSourceRef,date,...baseData},60000);
+      }
+      return jsonp('schedule.create',{token:state.token,sourceRef:previousSourceRef,date,...baseData},60000);
+    });
     const savePromise=Promise.allSettled(tasks).then(results=>{
       const saved=[];const failed=[];
       results.forEach((result,index)=>{
         if(result.status==='fulfilled'){
           try{
-            const res=assertOk(result.value);
-            if(res.event){saved.push(res.event);saveEventToLocalMonths(res.event);}else failed.push(dates[index]);
+            const event=normalizeSchedulePayload(assertOk(result.value));
+            if(event){saved.push(event);saveEventToLocalMonths(event);}else failed.push(dates[index]);
           }catch(e){failed.push(dates[index]);}
         }else{failed.push(dates[index]);}
       });
@@ -824,7 +872,7 @@ async function saveEvent(){
 async function deleteCurrent(){
   if(!state.currentEvent||!confirm('この予定を削除しますか？'))return;
   try{
-    const res=assertOk(await jsonp('delete',{token:state.token,scheduleId:state.currentEvent.scheduleId,sourceRef:state.currentEvent.sourceRef||''}));
+    assertOk(await jsonp('schedule.delete',{token:state.token,scheduleId:state.currentEvent.scheduleId,sourceRef:state.currentEvent.sourceRef||''}));
     const deletedId=state.currentEvent.scheduleId;closeModal();removeLocalEvent(deletedId);toast('削除しました。');
   }catch(e){toast(e.message)}
 }
@@ -834,22 +882,15 @@ async function uploadAttachment(){
   if(!file){showStatus(status,'添付するファイルを選択してください。','error');return}
   try{
     const processed=await prepareFile(file);
-    const uploadId='up_'+Date.now()+'_'+Math.random().toString(36).slice(2);
     showStatus(status,'アップロード中…');
-    await fetch(state.apiUrl,{
-      method:'POST',mode:'no-cors',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({
-        action:'uploadAttachment',uploadId,token:state.token,scheduleId:state.currentEvent.scheduleId,
-        fileName:processed.name,mimeType:processed.type,base64:processed.base64
-      })
-    });
-    const result=await pollUpload(uploadId);
-    assertOk(result);
+    assertOk(await jsonp('attachment.create',{token:state.token,scheduleId:state.currentEvent.scheduleId,fileName:processed.name,mimeType:processed.type,base64:processed.base64},60000));
     showStatus(status,'添付しました。','ok');
-    const fresh=assertOk(await jsonp('event',{token:state.token,scheduleId:state.currentEvent.scheduleId}));
-    saveEventToLocalMonths(fresh.event);
-    renderDetail(fresh.event);
+    const payload=assertOk(await jsonp('schedule.getById',{token:state.token,scheduleId:state.currentEvent.scheduleId},45000));
+    const freshEvent=normalizeSchedulePayload(payload);
+    if(!freshEvent)throw new Error('更新後の予定を取得できませんでした。');
+    const attachments=await loadAttachmentsForSchedule(freshEvent.scheduleId);
+    saveEventToLocalMonths(freshEvent);
+    renderDetail({...freshEvent,attachments});
   }catch(e){showStatus(status,e.message,'error')}
 }
 async function prepareFile(file){
@@ -871,38 +912,39 @@ async function prepareFile(file){
 }
 function fileToDataUrl(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(new Error('ファイルを読み込めませんでした。'));r.readAsDataURL(file)})}
 function loadImage(src){return new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=()=>reject(new Error('画像を読み込めませんでした。'));i.src=src})}
-async function pollUpload(uploadId){
-  for(let i=0;i<25;i++){
-    await new Promise(r=>setTimeout(r,900));
-    const res=await jsonp('uploadStatus',{token:state.token,uploadId});
-    if(res.status==='pending')continue;
-    return res;
-  }
-  throw new Error('アップロード確認がタイムアウトしました。');
+async function loadAttachmentsForSchedule(scheduleId){
+  if(!scheduleId)return [];
+  try{
+    const payload=assertOk(await jsonp('attachment.getBySchedule',{token:state.token,scheduleId},45000));
+    return normalizeAttachmentList(payload);
+  }catch(e){return []}
 }
 
-async function openAttachment(id){
+async function openAttachment(attachment){
   try{
+    const item = attachment && typeof attachment === 'object' ? attachment : null;
+    if(!item)throw new Error('添付データを確認できませんでした。');
+    const base64=item.base64 || item.contentBase64 || item.data || item.fileBase64 || '';
+    if(!base64)throw new Error('添付データを確認できませんでした。');
     toast('ファイルを読み込んでいます…');
-    const res=assertOk(await jsonp('attachmentContent',{token:state.token,attachmentId:id}));
-    const binary=atob(res.base64);
+    const binary=atob(String(base64));
     const bytes=new Uint8Array(binary.length);
     for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
-    const blob=new Blob([bytes],{type:res.mimeType||'application/octet-stream'});
+    const blob=new Blob([bytes],{type:item.mimeType||'application/octet-stream'});
     const url=URL.createObjectURL(blob);
-    const isImage=String(res.mimeType||'').startsWith('image/');
-    const isPdf=String(res.mimeType||'')==='application/pdf';
+    const isImage=String(item.mimeType||'').startsWith('image/');
+    const isPdf=String(item.mimeType||'')==='application/pdf';
 
     if(isImage){
       const viewer=document.createElement('div');
       viewer.className='modal open';
       viewer.style.zIndex='120';
-      viewer.innerHTML=`<section class="dialog" style="max-width:900px"><div class="dialoghead"><h3>${esc(res.fileName)}</h3><button class="close" type="button">×</button></div><div class="dialogbody" style="display:grid;place-items:center;background:#020617"><img src="${url}" alt="${esc(res.fileName)}" style="max-width:100%;max-height:78dvh;object-fit:contain"></div><div class="dialogfoot"><span class="spacer"></span><button class="btn" type="button" data-download>保存</button><button class="btn" type="button" data-close>閉じる</button></div></section>`;
+      viewer.innerHTML=`<section class="dialog" style="max-width:900px"><div class="dialoghead"><h3>${esc(item.fileName||'attachment')}</h3><button class="close" type="button">×</button></div><div class="dialogbody" style="display:grid;place-items:center;background:#020617"><img src="${url}" alt="${esc(item.fileName||'attachment')}" style="max-width:100%;max-height:78dvh;object-fit:contain"></div><div class="dialogfoot"><span class="spacer"></span><button class="btn" type="button" data-download>保存</button><button class="btn" type="button" data-close>閉じる</button></div></section>`;
       document.body.appendChild(viewer);
       const close=()=>{URL.revokeObjectURL(url);viewer.remove()};
       viewer.querySelector('.close').onclick=close;
       viewer.querySelector('[data-close]').onclick=close;
-      viewer.querySelector('[data-download]').onclick=()=>downloadBlob(url,res.fileName);
+      viewer.querySelector('[data-download]').onclick=()=>downloadBlob(url,item.fileName||'attachment');
       viewer.addEventListener('click',e=>{if(e.target===viewer)close()});
       return;
     }
@@ -911,17 +953,17 @@ async function openAttachment(id){
       const viewer=document.createElement('div');
       viewer.className='modal open';
       viewer.style.zIndex='120';
-      viewer.innerHTML=`<section class="dialog" style="max-width:1000px"><div class="dialoghead"><h3>${esc(res.fileName)}</h3><button class="close" type="button">×</button></div><div class="dialogbody" style="padding:0"><iframe src="${url}" title="${esc(res.fileName)}" style="width:100%;height:78dvh;border:0;background:white"></iframe></div><div class="dialogfoot"><span class="spacer"></span><button class="btn" type="button" data-download>保存</button><button class="btn" type="button" data-close>閉じる</button></div></section>`;
+      viewer.innerHTML=`<section class="dialog" style="max-width:1000px"><div class="dialoghead"><h3>${esc(item.fileName||'attachment')}</h3><button class="close" type="button">×</button></div><div class="dialogbody" style="padding:0"><iframe src="${url}" title="${esc(item.fileName||'attachment')}" style="width:100%;height:78dvh;border:0;background:white"></iframe></div><div class="dialogfoot"><span class="spacer"></span><button class="btn" type="button" data-download>保存</button><button class="btn" type="button" data-close>閉じる</button></div></section>`;
       document.body.appendChild(viewer);
       const close=()=>{URL.revokeObjectURL(url);viewer.remove()};
       viewer.querySelector('.close').onclick=close;
       viewer.querySelector('[data-close]').onclick=close;
-      viewer.querySelector('[data-download]').onclick=()=>downloadBlob(url,res.fileName);
+      viewer.querySelector('[data-download]').onclick=()=>downloadBlob(url,item.fileName||'attachment');
       viewer.addEventListener('click',e=>{if(e.target===viewer)close()});
       return;
     }
 
-    downloadBlob(url,res.fileName);
+    downloadBlob(url,item.fileName||'attachment');
     setTimeout(()=>URL.revokeObjectURL(url),10000);
   }catch(e){toast(e.message)}
 }
@@ -934,9 +976,12 @@ function downloadBlob(url,fileName){
 async function deleteAttachment(id){
   if(!confirm('この添付を削除しますか？'))return;
   try{
-    assertOk(await jsonp('deleteAttachment',{token:state.token,attachmentId:id}));
-    const fresh=assertOk(await jsonp('event',{token:state.token,scheduleId:state.currentEvent.scheduleId}));
-    saveEventToLocalMonths(fresh.event);renderDetail(fresh.event);toast('添付を削除しました。');
+    assertOk(await jsonp('attachment.delete',{token:state.token,attachmentId:id}));
+    const payload=assertOk(await jsonp('schedule.getById',{token:state.token,scheduleId:state.currentEvent.scheduleId},45000));
+    const freshEvent=normalizeSchedulePayload(payload);
+    if(!freshEvent)throw new Error('更新後の予定を取得できませんでした。');
+    const attachments=await loadAttachmentsForSchedule(freshEvent.scheduleId);
+    saveEventToLocalMonths(freshEvent);renderDetail({...freshEvent,attachments});toast('添付を削除しました。');
   }catch(e){toast(e.message)}
 }
 function shiftMonth(diff){const [y,m]=state.month.split('-').map(Number);loadMonth(monthKey(new Date(y,m-1+diff,1)))}
