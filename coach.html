@@ -256,7 +256,7 @@ const el={
   loginView:$('loginView'),appView:$('appView'),apiUrl:$('apiUrl'),password:$('password'),
   loginBtn:$('loginBtn'),loginStatus:$('loginStatus'),calendar:$('calendar'),monthTitle:$('monthTitle'),
   status:$('status'),modal:$('modal'),detailView:$('detailView'),form:$('eventForm'),
-  detailFoot:$('detailFoot'),editFoot:$('editFoot'),modalStatus:$('modalStatus')
+  detailFoot:$('detailFoot'),editFoot:$('editFoot'),modalStatus:$('modalStatus'),logoutBtn:$('logoutBtn')
 };
 
 function jsonp(action,params={},timeoutMs=25000){
@@ -607,8 +607,9 @@ async function initCoachLogin(){
     el.password.closest('.field').classList.add('hidden');
     $('newBtn').classList.toggle('hidden',state.role!=='coach');
     $('sheetBtn').classList.toggle('hidden',state.role!=='coach');
-    $('roleBadge').textContent='コーチ';
-    showStatus($('lineLoginStatus'),'前回のセッションを復元しました。');
+    el.logoutBtn.classList.remove('hidden');
+    $('roleBadge').textContent='コーチ認証済み';
+    showStatus($('lineLoginStatus'),'コーチ認証済み');
     await loadMonth(monthKey(new Date()));
     return true;
   }
@@ -617,7 +618,9 @@ async function initCoachLogin(){
   el.password.value='';
   el.loginBtn.classList.remove('hidden');
   el.password.closest('.field').classList.remove('hidden');
-  showStatus($('lineLoginStatus'),'コーチはパスワードでログインしてください。');
+  el.logoutBtn.classList.add('hidden');
+  $('roleBadge').textContent='コーチログイン';
+  showStatus($('lineLoginStatus'),'コーチログイン');
   return false;
 }
 function applyLogin(res){
@@ -625,7 +628,8 @@ function applyLogin(res){
   el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');
   $('newBtn').classList.toggle('hidden',state.role!=='coach');
   $('sheetBtn').classList.toggle('hidden',state.role!=='coach');
-  $('roleBadge').textContent='コーチ';
+  el.logoutBtn.classList.remove('hidden');
+  $('roleBadge').textContent='コーチ認証済み';
 }
 async function login(){
   try{
@@ -930,7 +934,7 @@ async function deleteAttachment(id){
   }catch(e){toast(e.message)}
 }
 function shiftMonth(diff){const [y,m]=state.month.split('-').map(Number);loadMonth(monthKey(new Date(y,m-1+diff,1)))}
-function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});clearSession();el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');el.loginBtn.classList.remove('hidden');el.password.closest('.field').classList.remove('hidden');el.password.value='';showStatus(el.loginStatus,'');showStatus($('lineLoginStatus'),'コーチはパスワードでログインしてください。')}
+function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});clearSession();el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');el.loginBtn.classList.remove('hidden');el.password.closest('.field').classList.remove('hidden');el.password.value='';el.logoutBtn.classList.add('hidden');$('roleBadge').textContent='コーチログイン';showStatus(el.loginStatus,'');showStatus($('lineLoginStatus'),'コーチログイン')}
 function enableMonthSwipe(){
   const target=document.querySelector('.calendar-wrap');
   let startX=0,startY=0,tracking=false;
