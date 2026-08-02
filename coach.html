@@ -97,13 +97,18 @@
     .day-list-meta{font-size:12px;color:var(--muted);line-height:1.5}
     .attendance-badge{display:inline-block;margin-left:5px;padding:1px 5px;border-radius:999px;background:#f8fafc;color:#0f172a;font-size:8px;font-weight:900}
     .day.has-events{cursor:pointer}
+    .batch-date-input{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .batch-date-input input{flex:1;min-width:180px}
+    .batch-date-list{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
+    .batch-date-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:6px 9px;background:#0b1e33;font-size:12px;font-weight:800}
+    .batch-date-chip button{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:0}
     @media(min-width:761px){
       .app{width:min(1180px,100%);margin:auto;padding-left:10px;padding-right:10px}.brand h1{font-size:20px}.brand small{display:block;color:var(--muted)}
       .event .cats{font-size:10px}.event .kind{font-size:11px}.daynum{font-size:12px}.calendar{grid-template-rows:32px repeat(6,minmax(0,1fr))}
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
-  <script src="./config.js?v=9.5.0"></script>
+  <script src="./config.js?v=9.7.0"></script>
 </head>
 <body>
   <section id="loginView" class="login">
@@ -120,7 +125,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ コーチ専用</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.6-coach</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ コーチ専用</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.7-coach</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">読込</button>
@@ -157,6 +162,15 @@
         <div class="grid2">
           <div class="field"><label>日付 *</label><input id="date" type="date" required></div>
           <div class="field"><label>予定種類 *</label><select id="type"></select></div>
+        </div>
+        <div class="field batch-date-field">
+          <label>同じ予定を登録する追加日</label>
+          <div class="batch-date-input">
+            <input id="batchDate" type="date">
+            <button id="addBatchDateBtn" type="button" class="btn">日付を追加</button>
+          </div>
+          <div id="batchDateList" class="batch-date-list"></div>
+          <div class="status">複数の日付を追加すると、同じ内容の予定を一括登録できます。複写時にも利用できます。</div>
         </div>
         <div class="field"><label>対象カテゴリー *</label><div id="categoryChoices" class="category-box"></div></div>
         <div class="field">
@@ -245,11 +259,10 @@ const state={
   currentEvent:null,
   selectedDate:'',
   categoryFilter:'ALL',
-  growthPlayerName:'',
-  growthRecord:null,
   mode:'detail',
   loadingMonth:false,
-  dataVersion:''
+  dataVersion:'',
+  batchDates:[]
 };
 const $=id=>document.getElementById(id);
 const el={
@@ -340,7 +353,32 @@ function selectedCategories(){
   });
   return expanded;
 }
+function renderBatchDates(){
+  const box=$('batchDateList');
+  if(!box)return;
+  box.innerHTML=state.batchDates.map(date=>`<span class="batch-date-chip">${esc(date)}<button type="button" data-remove-batch-date="${esc(date)}" aria-label="${esc(date)}を削除">×</button></span>`).join('');
+  box.querySelectorAll('[data-remove-batch-date]').forEach(button=>button.onclick=()=>{
+    state.batchDates=state.batchDates.filter(date=>date!==button.dataset.removeBatchDate);
+    renderBatchDates();
+  });
+}
+function resetBatchDates(){
+  state.batchDates=[];
+  if($('batchDate'))$('batchDate').value='';
+  renderBatchDates();
+}
+function addBatchDate(){
+  const input=$('batchDate');
+  const date=input.value;
+  if(!date){toast('追加する日付を選択してください。');return;}
+  if(date===$('date').value){toast('基本の日付と同じ日付は追加できません。');return;}
+  if(!state.batchDates.includes(date))state.batchDates.push(date);
+  state.batchDates.sort();
+  input.value='';
+  renderBatchDates();
+}
 function fillForm(e){
+  resetBatchDates();
   $('scheduleId').value=e?.scheduleId||'';
   $('sourceRef').value=e?.sourceRef||'';
   $('date').value=e?.date||todayKey();
@@ -382,15 +420,6 @@ function renderDetail(e){
     </dl>
     <div id="attendancePanel">${renderAttendancePanel(e)}</div>
     <div class="field" style="margin-top:18px">
-      <label>成長記録</label>
-      <div class="upload-row">
-        <input id="growthPlayerInput" type="text" value="${esc(state.growthPlayerName||'')}" placeholder="選手名を入力">
-        <button id="growthLoadBtn" type="button" class="btn primary">表示</button>
-      </div>
-      <div id="growthRecordStatus" class="status"></div>
-      <div id="growthRecordCard">${renderGrowthRecordCard(state.growthRecord)}</div>
-    </div>
-    <div class="field" style="margin-top:18px">
       <label>写真・ファイル添付</label>
       <div class="upload-row" id="uploadRow">
         <input id="attachmentInput" type="file" accept="image/jpeg,image/png,application/pdf,.doc,.docx,.xls,.xlsx">
@@ -402,8 +431,6 @@ function renderDetail(e){
   bindAttendancePanel(e);
   if(state.role==='player') $('uploadRow').classList.add('hidden');
   $('uploadBtn').addEventListener('click',uploadAttachment);
-  $('growthLoadBtn').addEventListener('click',()=>loadGrowthRecord($('growthPlayerInput').value));
-  $('growthPlayerInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadGrowthRecord($('growthPlayerInput').value);}});
   el.detailView.querySelectorAll('[data-open-attachment]').forEach(btn=>btn.addEventListener('click',()=>openAttachment(btn.dataset.openAttachment)));
   el.detailView.querySelectorAll('[data-delete-attachment]').forEach(btn=>btn.addEventListener('click',()=>deleteAttachment(btn.dataset.deleteAttachment)));
   setMode('detail');
@@ -531,69 +558,6 @@ async function loadAttendanceSummary(scheduleId){
 function toggleDeadline(){$('deadlineFields').classList.toggle('hidden',!$('attendanceEnabled').checked)}
 
 function formatBytes(n){n=Number(n)||0;if(n<1024)return n+'B';if(n<1048576)return (n/1024).toFixed(1)+'KB';return (n/1048576).toFixed(1)+'MB'}
-function pickGrowthValue(record,keys){for(const key of keys){const value=record?.[key];if(value!==undefined&&value!==null&&String(value).trim()!=='')return value;}return ''}
-function normalizeGrowthRecord(res){
-  const payload=res?.record||res?.growthRecord||res?.data||res;
-  if(!payload||typeof payload!=='object')return null;
-  const record=Array.isArray(payload)?payload[0]:payload;
-  if(!record||typeof record!=='object')return null;
-  return {
-    shooting:pickGrowthValue(record,['shooting','shoot','shot','shotting','shootingScore']),
-    height:pickGrowthValue(record,['height','heightCm','height_cm','heightInCm']),
-    weight:pickGrowthValue(record,['weight','weightKg','weight_kg','bodyWeight']),
-    agility:pickGrowthValue(record,['agility','agilityScore','agilityTime','agilitySec'])
-  };
-}
-function renderGrowthRecordCard(record,errorMsg=''){
-  if(errorMsg){return `<div class="attendance-card"><h4>成長記録</h4><div class="status error">${esc(errorMsg)}</div></div>`;}
-  if(!record){return `<div class="attendance-card"><h4>成長記録</h4><div class="status">選手名を入力して表示してください。</div></div>`;}
-  const items=[
-    ['シュート',record.shooting],
-    ['身長',record.height],
-    ['体重',record.weight],
-    ['敏捷性',record.agility]
-  ].filter(([,value])=>value!=='' && value!==undefined && value!==null);
-  if(!items.length){return `<div class="attendance-card"><h4>成長記録</h4><div class="status">成長記録データが見つかりませんでした。</div></div>`;}
-  return `<div class="attendance-card"><h4>成長記録</h4><div class="summary-counts">${items.map(([label,value])=>`<div class="summary-count"><strong>${esc(String(value))}</strong>${esc(label)}</div>`).join('')}</div></div>`;
-}
-async function loadGrowthRecord(playerName){
-  const name=(playerName||'').trim();
-  const status=$('growthRecordStatus');
-  const card=$('growthRecordCard');
-  if(!name){showStatus(status,'選手名を入力してください。','error');card.innerHTML=renderGrowthRecordCard(null);return;}
-  state.growthPlayerName=name;
-  showStatus(status,'成長記録を読み込んでいます…');
-  card.innerHTML=renderGrowthRecordCard(null);
-  try{
-    const candidates=[
-      {action:'growthRecord',params:{playerName:name}},
-      {action:'growthRecord',params:{player:name}},
-      {action:'growthRecord',params:{name}},
-      {action:'getGrowthRecord',params:{playerName:name}},
-      {action:'getGrowthRecord',params:{player:name}},
-      {action:'growthRecords',params:{playerName:name}},
-      {action:'growthRecords',params:{player:name}}
-    ];
-    let lastError=null;
-    let res=null;
-    for(const candidate of candidates){
-      try{
-        res=assertOk(await jsonp(candidate.action,{token:state.token,...candidate.params},45000));
-        break;
-      }catch(e){lastError=e;}
-    }
-    if(!res)throw lastError||new Error('成長記録APIに接続できませんでした。');
-    const record=normalizeGrowthRecord(res);
-    if(!record)throw new Error('成長記録データを取得できませんでした。');
-    state.growthRecord=record;
-    card.innerHTML=renderGrowthRecordCard(record);
-    showStatus(status,'成長記録を表示しました。','ok');
-  }catch(e){
-    state.growthRecord=null;
-    card.innerHTML=renderGrowthRecordCard(null,e.message);
-    showStatus(status,e.message,'error');
-  }
-}
 
 async function initCoachLogin(){
   state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');
@@ -605,9 +569,9 @@ async function initCoachLogin(){
     el.loginView.classList.add('hidden');el.appView.classList.remove('hidden');
     el.loginBtn.classList.add('hidden');
     el.password.closest('.field').classList.add('hidden');
+    el.logoutBtn.classList.remove('hidden');
     $('newBtn').classList.toggle('hidden',state.role!=='coach');
     $('sheetBtn').classList.toggle('hidden',state.role!=='coach');
-    el.logoutBtn.classList.remove('hidden');
     $('roleBadge').textContent='コーチ認証済み';
     showStatus($('lineLoginStatus'),'コーチ認証済み');
     await loadMonth(monthKey(new Date()));
@@ -640,7 +604,7 @@ async function login(){
     await loadMonth(monthKey(new Date()));
   }catch(e){showStatus(el.loginStatus,e.message,'error')}
 }
-function monthCacheKey(month){return 'ninjaScheduleMonthV9_5:'+month}
+function monthCacheKey(month){return 'ninjaScheduleMonthV9_7:'+month}
 function readMonthCache(month){
   try{
     const raw=localStorage.getItem(monthCacheKey(month));
@@ -659,7 +623,7 @@ function removeEventFromAllLocalMonths(scheduleId){
   if(!scheduleId)return;
   for(let i=localStorage.length-1;i>=0;i--){
     const key=localStorage.key(i)||'';
-    if(!key.startsWith('ninjaScheduleMonthV9_5:'))continue;
+    if(!key.startsWith('ninjaScheduleMonthV9_7:'))continue;
     try{
       const data=JSON.parse(localStorage.getItem(key)||'{}');
       if(!Array.isArray(data.events))continue;
@@ -691,10 +655,10 @@ async function loadMonth(month,{force=false}={}){
   renderCalendar();
 
   if(cached&&!force){
-    showStatus(el.status,`${month.replace('-','.')} を端末保存データから表示しています。`,'ok');
-    return;
+    showStatus(el.status,`${month.replace('-','.')} の保存データを表示し、最新予定を確認しています。`,'ok');
   }
 
+  // コーチ版・選手版の予定差を防ぐため、キャッシュがあっても毎回APIへ最新予定を確認する。
   await fetchMonthOnce(month,{manual:force});
 }
 async function fetchMonthOnce(month,{manual=false}={}){
@@ -703,7 +667,7 @@ async function fetchMonthOnce(month,{manual=false}={}){
   if($('sheetBtn'))$('sheetBtn').disabled=true;
   showStatus(el.status,manual?'現在の月を読み込んでいます…':'初回データを読み込んでいます…');
   try{
-    const res=assertOk(await jsonp('events',{token:state.token,month},25000));
+    const res=assertOk(await jsonp('events',{token:state.token,month,force:'1'},25000));
     if(state.month!==month)return;
     state.events=sortEvents(res.events||[]);
     state.sourceUrl=res.sourceUrl||'';
@@ -794,26 +758,68 @@ function editCurrent(){if(!state.currentEvent)return;$('modalTitle').textContent
 function copyCurrent(){if(!state.currentEvent)return;const copy={...state.currentEvent,scheduleId:'',sourceRef:'',date:state.currentEvent.date};$('modalTitle').textContent='予定複写';fillForm(copy);showStatus(el.modalStatus,'');setMode('edit')}
 function toggleTimes(){$('timeFields').classList.toggle('hidden',$('allDay').checked)}
 async function saveEvent(){
+  const button=$('saveBtn');
   try{
     const categories=selectedCategories();
     if(!categories.length)throw new Error('カテゴリーを1つ以上選択してください。');
+    const primaryDate=$('date').value;
+    if(!primaryDate)throw new Error('日付を選択してください。');
+
     const previousId=$('scheduleId').value;
-    const data={
-      token:state.token,scheduleId:previousId,sourceRef:$('sourceRef').value,
-      date:$('date').value,type:$('type').value,color:normalizeHexColor($('eventColor').value),categories:JSON.stringify(categories),
-      title:$('title').value.trim(),location:$('location').value.trim(),
-      allDay:$('allDay').checked,startTime:$('startTime').value,endTime:$('endTime').value,
-      note:$('note').value.trim(),attendanceEnabled:$('attendanceEnabled').checked,
-      deadlineDate:$('deadlineDate').value,deadlineTime:$('deadlineTime').value
+    const previousSourceRef=$('sourceRef').value;
+    const dates=[primaryDate,...state.batchDates.filter(date=>date&&date!==primaryDate)];
+    const baseData={
+      token:state.token,
+      type:$('type').value,
+      color:normalizeHexColor($('eventColor').value),
+      categories:JSON.stringify(categories),
+      title:$('title').value.trim(),
+      location:$('location').value.trim(),
+      allDay:$('allDay').checked,
+      startTime:$('startTime').value,
+      endTime:$('endTime').value,
+      note:$('note').value.trim(),
+      attendanceEnabled:$('attendanceEnabled').checked,
+      deadlineDate:$('deadlineDate').value,
+      deadlineTime:$('deadlineTime').value
     };
-    $('saveBtn').disabled=true;showStatus(el.modalStatus,'保存中…');
-    const res=assertOk(await jsonp('save',data));
-    if(!res.event)throw new Error('保存後の予定データを取得できませんでした。');
-    const targetMonth=res.event.date.slice(0,7);
+
+    button.disabled=true;
+    showStatus(el.modalStatus,dates.length>1?`${dates.length}件を保存しています…`:'保存しています…');
     closeModal();
-    await loadMonth(targetMonth,{force:true});
-    toast('保存しました。');
-  }catch(e){showStatus(el.modalStatus,e.message,'error')}finally{$('saveBtn').disabled=false}
+    toast(dates.length>1?`${dates.length}件の保存を開始しました。`:'保存を開始しました。');
+
+    const tasks=dates.map((date,index)=>jsonp('save',{
+      ...baseData,
+      date,
+      scheduleId:index===0?previousId:'',
+      sourceRef:index===0?previousSourceRef:''
+    },60000));
+    const savePromise=Promise.allSettled(tasks).then(results=>{
+      const saved=[];const failed=[];
+      results.forEach((result,index)=>{
+        if(result.status==='fulfilled'){
+          try{
+            const res=assertOk(result.value);
+            if(res.event){saved.push(res.event);saveEventToLocalMonths(res.event);}else failed.push(dates[index]);
+          }catch(e){failed.push(dates[index]);}
+        }else{failed.push(dates[index]);}
+      });
+      const months=[...new Set(dates.map(date=>date.slice(0,7)))];
+      if(failed.length){
+        if(months.includes(state.month))renderCalendar();
+        toast(`保存確認：${saved.length}件完了、${failed.length}件は「読込」で確認してください。`);
+      }else{
+        if(months.includes(state.month))renderCalendar();
+        toast(`${saved.length}件保存しました。`);
+      }
+    });
+    void savePromise.finally(()=>{if(button&&document.body.contains(button))button.disabled=false;});
+  }catch(e){
+    showStatus(el.status,e.message,'error');
+    toast(e.message);
+    if(button)button.disabled=false;
+  }
 }
 async function deleteCurrent(){
   if(!state.currentEvent||!confirm('この予定を削除しますか？'))return;
@@ -934,7 +940,7 @@ async function deleteAttachment(id){
   }catch(e){toast(e.message)}
 }
 function shiftMonth(diff){const [y,m]=state.month.split('-').map(Number);loadMonth(monthKey(new Date(y,m-1+diff,1)))}
-function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});clearSession();el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');el.loginBtn.classList.remove('hidden');el.password.closest('.field').classList.remove('hidden');el.password.value='';el.logoutBtn.classList.add('hidden');$('roleBadge').textContent='コーチログイン';showStatus(el.loginStatus,'');showStatus($('lineLoginStatus'),'コーチログイン')}
+function logout(callApi=true){if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});clearSession();el.appView.classList.add('hidden');el.loginView.classList.remove('hidden');el.loginBtn.classList.remove('hidden');el.password.closest('.field').classList.remove('hidden');el.logoutBtn.classList.add('hidden');$('roleBadge').textContent='コーチログイン';showStatus(el.loginStatus,'');showStatus($('lineLoginStatus'),'コーチログイン')}
 function enableMonthSwipe(){
   const target=document.querySelector('.calendar-wrap');
   let startX=0,startY=0,tracking=false;
@@ -954,10 +960,12 @@ function enableMonthSwipe(){
 async function init(){
   buildSelectors();enableMonthSwipe();state.selectedDate=todayKey();state.categoryFilter='ALL';el.apiUrl.value=state.apiUrl;$('categoryFilter').value='ALL';
   el.loginBtn.onclick=login;$('newBtn').onclick=()=>newEvent();$('categoryFilter').onchange=()=>{state.categoryFilter=$('categoryFilter').value||'ALL';renderCalendar()};$('prevBtn').onclick=()=>shiftMonth(-1);$('nextBtn').onclick=()=>shiftMonth(1);$('todayBtn').onclick=()=>loadMonth(monthKey(new Date()));
-  $('sheetBtn').onclick=manualRefreshMonth;$('logoutBtn').onclick=()=>logout(true);
+  $('sheetBtn').onclick=manualRefreshMonth;el.logoutBtn.onclick=()=>logout(true);
   $('closeBtn').onclick=closeModal;$('closeDetailBtn').onclick=closeModal;$('editBtn').onclick=editCurrent;$('copyBtn').onclick=copyCurrent;$('deleteBtn').onclick=deleteCurrent;
   $('cancelEditBtn').onclick=()=>state.currentEvent?renderDetail(state.currentEvent):closeModal();$('saveBtn').onclick=saveEvent;$('allDay').onchange=toggleTimes;
   $('attendanceEnabled').onchange=toggleDeadline;
+  $('addBatchDateBtn').onclick=addBatchDate;
+  $('date').onchange=()=>{state.batchDates=state.batchDates.filter(date=>date!==$('date').value);renderBatchDates();};
   el.modal.addEventListener('click',e=>{if(e.target===el.modal)closeModal()});
   $('dayListClose').onclick=closeDayList;
   $('dayListCloseBtn').onclick=closeDayList;
@@ -969,12 +977,12 @@ async function init(){
   if('caches' in window){
     try{
       const keys=await caches.keys();
-      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v9-5').map(k=>caches.delete(k)));
+      await Promise.all(keys.filter(k=>k!=='ninja-schedule-v9-7').map(k=>caches.delete(k)));
     }catch(e){}
   }
   if('serviceWorker' in navigator){
     try{
-      const reg=await navigator.serviceWorker.register('./sw.js?v=9.5.0');
+      const reg=await navigator.serviceWorker.register('./sw.js?v=9.7.0');
       reg.update().catch(()=>{});
     }catch(e){}
   }
