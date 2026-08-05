@@ -1,3 +1,2264 @@
+
+今日 14:57
+スクリーンショット 2026-08-05 14.57.09.png
+URL教えて
+
+
+appsscript(6).json
+ファイル
+
+Code(20260805-060147).gs
+ファイル
+
+index(20260805-060149).html
+ファイル
+
+manifest(20260805-060147).json
+ファイル
+
+SETUP(10).txt
+ドキュメント
+
+sw(20260805-060147).js
+JavaScript
+
+S__15188046.jpg
+スマホで見れない
+
+スクリーンショット 2026-08-05 15.09.28.png
+
+スクリーンショット 2026-08-05 15.11.05.png
+
+
+貼り付けたコード（1）.js
+JavaScript
+
+
+貼り付けたコード（1）(1).js
+JavaScript
+
+
+貼り付けたコード（2）.js
+JavaScript
+
+貼り付けたコード（2）(1).js
+JavaScript
+
+貼り付けたコード（3）.js
+JavaScript
+
+貼り付けたコード（4）.js
+JavaScript
+
+貼り付けたコード（5）.js
+JavaScript
+
+
+貼り付けたコード（1）(3).js
+JavaScript
+
+貼り付けたコード（2）(2).js
+JavaScript
+
+貼り付けたコード（3）(1).js
+JavaScript
+/**
+ * NINJA SCHEDULE API v12.1
+ * CoachScheduleGateway.gs
+ *
+ * GitHub Pagesのコーチ用スケジュール画面と、
+ * v12 ScheduleServiceを安全に接続します。
+ *
+ * Script Properties
+ * ・COACH_APP_PASSWORD
+ *
+ * 更新日：2026-07-30
+ */
+
+const COACH_APP_CONFIG = Object.freeze({
+  VERSION: 'v12.1.0',
+  PASSWORD_PROPERTY: 'COACH_APP_PASSWORD',
+  TOKEN_PREFIX: 'ninja_coach_token_',
+  TOKEN_SECONDS: 21600
+});
+
+
+/**
+ * 初回設定です。任意のコーチ用パスワードを指定して1回実行します。
+ *
+ * @param {string} password
+ * @return {Object}
+ */
+function setupCoachScheduleAppV12(password) {
+  const value = utilTrim_(password);
+
+  if (value.length < 4) {
+    throw new Error(
+      'コーチ用パスワードは4文字以上で設定してください。'
+    );
+  }
+
+  PropertiesService
+    .getScriptProperties()
+    .setProperty(
+      COACH_APP_CONFIG.PASSWORD_PROPERTY,
+      value
+    );
+
+  const result = {
+    success: true,
+    version: COACH_APP_CONFIG.VERSION,
+    passwordConfigured: true,
+    checkedAt: utilNowString_()
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+
+/**
+ * coach.app APIの入口です。
+ *
+ * @param {Object} params
+ * @return {*}
+ */
+function coachAppHandle_(params) {
+  const op = utilTrim_(params && params.op);
+
+  switch (op) {
+    case 'health':
+      return {
+        status: 'ok',
+        version: COACH_APP_CONFIG.VERSION,
+        passwordConfigured:
+          coachAppGetPassword_() !== '',
+        checkedAt: utilNowString_()
+      };
+
+    case 'login':
+      return coachAppLogin_(
+        params.password
+      );
+
+    case 'logout':
+      return coachAppLogout_(
+        params.token
+      );
+
+    case 'month':
+      coachAppRequireSession_(
+        params.token
+      );
+      return coachAppGetMonth_(
+        params.year,
+        params.month
+      );
+
+    case 'get':
+      coachAppRequireSession_(
+        params.token
+      );
+      return scheduleGetById_(
+        params.scheduleId
+      );
+
+    case 'save':
+      coachAppRequireSession_(
+        params.token
+      );
+      return coachAppSave_(
+        params.scheduleId,
+        coachAppResolveData_(params)
+      );
+
+    case 'delete':
+      coachAppRequireSession_(
+        params.token
+      );
+      return scheduleDelete_(
+        params.scheduleId
+      );
+
+    case 'copy':
+      coachAppRequireSession_(
+        params.token
+      );
+      return scheduleCopy_(
+        params.scheduleId,
+        coachAppResolveData_(params)
+      );
+
+    default:
+      throw new Error(
+        '未対応のコーチアプリ処理です。op：' + op
+      );
+  }
+}
+
+
+/**
+ * ログインします。
+ *
+ * @param {*} password
+ * @return {Object}
+ */
+function coachAppLogin_(password) {
+  const configured =
+    coachAppGetPassword_();
+
+  if (!configured) {
+    throw new Error(
+      'コーチアプリのパスワードが未設定です。'
+    );
+  }
+
+  if (
+    utilTrim_(password) !==
+    configured
+  ) {
+    throw new Error(
+      'パスワードが違います。'
+    );
+  }
+
+  const token =
+    Utilities
+      .getUuid()
+      .replace(/-/g, '');
+
+  CacheService
+    .getScriptCache()
+    .put(
+      COACH_APP_CONFIG.TOKEN_PREFIX +
+        token,
+      JSON.stringify({
+        role: 'coach',
+        createdAt: new Date().getTime()
+      }),
+      COACH_APP_CONFIG.TOKEN_SECONDS
+    );
+
+  return {
+    token: token,
+    role: 'coach',
+    expiresIn:
+      COACH_APP_CONFIG.TOKEN_SECONDS,
+    version:
+      COACH_APP_CONFIG.VERSION
+  };
+}
+
+
+/**
+ * ログアウトします。
+ *
+ * @param {*} token
+ * @return {Object}
+ */
+function coachAppLogout_(token) {
+  const value = utilTrim_(token);
+
+  if (value) {
+    CacheService
+      .getScriptCache()
+      .remove(
+        COACH_APP_CONFIG.TOKEN_PREFIX +
+          value
+      );
+  }
+
+  return {
+    loggedOut: true
+  };
+}
+
+
+/**
+ * セッションを確認します。
+ *
+ * @param {*} token
+ * @return {Object}
+ */
+function coachAppRequireSession_(token) {
+  const value = utilTrim_(token);
+
+  if (!value) {
+    throw new Error(
+      'コーチログインが必要です。'
+    );
+  }
+
+  const raw =
+    CacheService
+      .getScriptCache()
+      .get(
+        COACH_APP_CONFIG.TOKEN_PREFIX +
+          value
+      );
+
+  if (!raw) {
+    throw new Error(
+      'ログインの有効期限が切れました。再ログインしてください。'
+    );
+  }
+
+  return JSON.parse(raw);
+}
+
+
+/**
+ * 指定月の予定を取得します。
+ *
+ * @param {*} year
+ * @param {*} month
+ * @return {Object}
+ */
+function coachAppGetMonth_(year, month) {
+  const y = utilToInteger_(year, null);
+  const m = utilToInteger_(month, null);
+
+  if (
+    y === null ||
+    m === null ||
+    m < 1 ||
+    m > 12
+  ) {
+    throw new Error(
+      '取得する年月が正しくありません。'
+    );
+  }
+
+  return {
+    year: y,
+    month: m,
+    events:
+      scheduleGetByMonth_(y, m)
+  };
+}
+
+
+/**
+ * 予定を追加または更新します。
+ *
+ * @param {*} scheduleId
+ * @param {Object} data
+ * @return {Object}
+ */
+function coachAppSave_(scheduleId, data) {
+  if (!utilIsObject_(data)) {
+    throw new Error(
+      '予定データが正しくありません。'
+    );
+  }
+
+  const id = utilTrim_(scheduleId);
+
+  return id
+    ? scheduleUpdate_(id, data)
+    : scheduleCreate_(data);
+}
+
+
+/**
+ * dataを取得します。
+ *
+ * @param {Object} params
+ * @return {Object}
+ */
+function coachAppResolveData_(params) {
+  if (
+    params &&
+    utilIsObject_(params.data)
+  ) {
+    return params.data;
+  }
+
+  if (
+    params &&
+    typeof params.data === 'string'
+  ) {
+    try {
+      const parsed =
+        JSON.parse(params.data);
+
+      return utilIsObject_(parsed)
+        ? parsed
+        : {};
+    } catch (error) {
+      throw new Error(
+        '予定データのJSONが正しくありません。'
+      );
+    }
+  }
+
+  return {};
+}
+
+
+/**
+ * 設定済みパスワードを取得します。
+ *
+ * @return {string}
+ */
+function coachAppGetPassword_() {
+  return utilTrim_(
+    PropertiesService
+      .getScriptProperties()
+      .getProperty(
+        COACH_APP_CONFIG
+          .PASSWORD_PROPERTY
+      )
+  );
+}
+
+
+/**
+ * 安全テストです。
+ *
+ * @return {Object}
+ */
+function testCoachScheduleGatewayV12() {
+  const result = {
+    success:
+      typeof coachAppHandle_ ===
+        'function' &&
+      typeof scheduleGetByMonth_ ===
+        'function' &&
+      typeof scheduleCreate_ ===
+        'function' &&
+      typeof scheduleUpdate_ ===
+        'function' &&
+      typeof scheduleDelete_ ===
+        'function',
+    version:
+      COACH_APP_CONFIG.VERSION,
+    passwordConfigured:
+      coachAppGetPassword_() !== '',
+    scheduleCount:
+      scheduleGetAll_().length,
+    note:
+      'このテストでは予定の追加・更新・削除を行いません。',
+    checkedAt:
+      utilNowString_()
+  };
+
+  console.log(
+    JSON.stringify(
+      result,
+      null,
+      2
+    )
+  );
+
+  return result;
+}
+
+/**
+ * NINJA SCHEDULE API v12.1
+ * Constants.gs
+ *
+ * システム全体で共通利用する定数を管理します。
+ *
+ * 重要
+ * ・このファイルは既存のConstants.gsを全置換します。
+ * ・スケジュールの正式シート名は「schedules」です。
+ * ・既存Serviceとの互換性のためCOACH_SCHEDULEもschedulesを返します。
+ */
+
+const APP_CONFIG = Object.freeze({
+  APP_NAME: 'NINJA SCHEDULE API',
+  APP_VERSION: 'v12.1.0',
+  API_VERSION: 'v12.1',
+  TIMEZONE: 'Asia/Tokyo',
+  MAX_LOG_ROWS: 2000,
+  LOCK_WAIT_MILLISECONDS: 30000,
+});
+
+
+/* =========================================================
+ * データID
+ * ======================================================= */
+
+/**
+ * データIDの接頭辞です。
+ *
+ * Utils.gsのID生成処理から参照されます。
+ */
+const ID_PREFIXES = Object.freeze({
+  PLAYER: 'player',
+  SCHEDULE: 'schedule',
+  ATTENDANCE: 'attendance',
+  ATTACHMENT: 'attachment',
+});
+
+
+/* =========================================================
+ * シート名
+ * ======================================================= */
+
+const DB_SHEET_NAMES = Object.freeze({
+  PLAYERS: 'players',
+  VERSION: 'version',
+
+  SHOOTING_RECORDS: 'shooting_records',
+  SHOOTING: 'shooting_records',
+
+  BODY_RECORDS: '身体測定',
+  BODY: '身体測定',
+
+  AGILITY_RECORDS: 'agility_records',
+  AGILITY: 'agility_records',
+
+  SCHEDULES: 'schedules',
+
+  /*
+   * 既存のScheduleService.gsが
+   * DB_SHEET_NAMES.COACH_SCHEDULEを参照しているため、
+   * 正式シート「schedules」への互換エイリアスとします。
+   */
+  COACH_SCHEDULE: 'schedules',
+
+  ATTENDANCE: 'attendance',
+  ATTACHMENTS: 'attachments',
+  FEEDBACK: 'feedback',
+  SETTINGS: 'settings',
+  LOGS: 'logs',
+});
+
+
+/* =========================================================
+ * データベースヘッダー
+ * ======================================================= */
+
+const DB_HEADERS = Object.freeze({
+  PLAYERS: Object.freeze([
+    '選手ID',
+    'パスワード',
+    '選手名',
+    'ふりがな',
+    'カテゴリー',
+    '学年',
+    '性別',
+    'LINEユーザーID',
+    '保護者LINEユーザーID',
+    '状態',
+    '登録日時',
+    '更新日時',
+    'メモ',
+  ]),
+
+  VERSION: Object.freeze([
+    'バージョン',
+    '更新日時',
+    '内容',
+  ]),
+
+  SHOOTING_RECORDS: Object.freeze([
+    '送信日時',
+    '同期種別',
+    '記録ID',
+    '日付',
+    '選手ID',
+    '選手名',
+    'カテゴリー',
+    '練習',
+    '種目',
+    'ポジション',
+    '成功数',
+    '試投数',
+    '成功率',
+    '作成日時',
+    '更新日時',
+    '削除日時',
+  ]),
+
+  SHOOTING: Object.freeze([
+    '送信日時',
+    '同期種別',
+    '記録ID',
+    '日付',
+    '選手ID',
+    '選手名',
+    'カテゴリー',
+    '練習',
+    '種目',
+    'ポジション',
+    '成功数',
+    '試投数',
+    '成功率',
+    '作成日時',
+    '更新日時',
+    '削除日時',
+  ]),
+
+  BODY_RECORDS: Object.freeze([
+    '選手名',
+    '項目',
+  ]),
+
+  BODY: Object.freeze([
+    '選手名',
+    '項目',
+  ]),
+
+  AGILITY_RECORDS: Object.freeze([
+    '送信日時',
+    '同期種別',
+    '記録ID',
+    '日付',
+    '選手ID',
+    '選手名',
+    'カテゴリー',
+    '種目',
+    '記録',
+    '単位',
+    '作成日時',
+    '更新日時',
+    '削除日時',
+  ]),
+
+  AGILITY: Object.freeze([
+    '送信日時',
+    '同期種別',
+    '記録ID',
+    '日付',
+    '選手ID',
+    '選手名',
+    'カテゴリー',
+    '種目',
+    '記録',
+    '単位',
+    '作成日時',
+    '更新日時',
+    '削除日時',
+  ]),
+
+  SCHEDULES: Object.freeze([
+    '予定ID',
+    '日付',
+    '終日',
+    '開始時刻',
+    '終了時刻',
+    'カテゴリー',
+    '種別',
+    'タイトル',
+    '場所',
+    '詳細',
+    '色',
+    '出欠確認',
+    '回答期限',
+    '通知',
+    '作成者',
+    '作成日時',
+    '更新日時',
+    '削除日時',
+    '内容',
+    '予定種類',
+    '複数カテゴリー',
+    '予定色',
+    '出欠回答',
+    '回答期限日',
+    '回答期限時刻',
+  ]),
+
+  COACH_SCHEDULE: Object.freeze([
+    '予定ID',
+    '日付',
+    '終日',
+    '開始時刻',
+    '終了時刻',
+    'カテゴリー',
+    '種別',
+    'タイトル',
+    '場所',
+    '詳細',
+    '色',
+    '出欠確認',
+    '回答期限',
+    '通知',
+    '作成者',
+    '作成日時',
+    '更新日時',
+    '削除日時',
+    '内容',
+    '予定種類',
+    '複数カテゴリー',
+    '予定色',
+    '出欠回答',
+    '回答期限日',
+    '回答期限時刻',
+  ]),
+
+  ATTENDANCE: Object.freeze([
+    '回答ID',
+    '予定ID',
+    '選手ID',
+    '選手名',
+    'カテゴリー',
+    '回答',
+    '到着予定時刻',
+    '理由',
+    '回答日時',
+    '更新日時',
+    'LINEユーザーID',
+    '削除日時',
+  ]),
+
+  ATTACHMENTS: Object.freeze([
+    '添付ID',
+    '予定ID',
+    'ファイル名',
+    'MIMEタイプ',
+    'DriveID',
+    'URL',
+    '作成者',
+    '作成日時',
+    '更新日時',
+    '削除日時',
+  ]),
+
+  FEEDBACK: Object.freeze([
+    'フィードバックID',
+    '選手ID',
+    '対象年月',
+    'いいところ',
+    '改善点',
+    '方向性',
+    '総合所見',
+    '作成者',
+    '作成日時',
+    '更新日時',
+    '削除日時',
+  ]),
+
+  SETTINGS: Object.freeze([
+    'キー',
+    '値',
+    '説明',
+    '更新日時',
+  ]),
+
+  LOGS: Object.freeze([
+    '日時',
+    '処理',
+    'ユーザー',
+    '結果',
+    '内容',
+  ]),
+});
+
+
+/* =========================================================
+ * 日付形式
+ * ======================================================= */
+
+const DATE_FORMATS = Object.freeze({
+  DATE: 'yyyy-MM-dd',
+  DATE_SLASH: 'yyyy/MM/dd',
+  DATETIME: 'yyyy-MM-dd HH:mm:ss',
+  DATETIME_SLASH: 'yyyy/MM/dd HH:mm:ss',
+  TIME: 'HH:mm',
+  TIME_SECONDS: 'HH:mm:ss',
+  MONTH: 'yyyy-MM',
+  MONTH_SLASH: 'yyyy/M',
+  YEAR_MONTH_JA: 'yyyy年M月',
+  ISO_DATE: 'yyyy-MM-dd',
+  ISO_DATETIME: "yyyy-MM-dd'T'HH:mm:ss",
+});
+
+
+/* =========================================================
+ * 設定キー
+ * ======================================================= */
+
+const SETTINGS_KEYS = Object.freeze({
+  APP_VERSION: 'APP_VERSION',
+  TIMEZONE: 'TIMEZONE',
+
+  DEFAULT_DEADLINE_TIME:
+    'DEFAULT_DEADLINE_TIME',
+
+  ATTENDANCE_EDITABLE_UNTIL_DEADLINE:
+    'ATTENDANCE_EDITABLE_UNTIL_DEADLINE',
+
+  SCHEDULE_NOTIFICATION_ENABLED:
+    'SCHEDULE_NOTIFICATION_ENABLED',
+
+  GROWTH_LIFF_ID:
+    'GROWTH_LIFF_ID',
+
+  LINE_LOGIN_CHANNEL_ID:
+    'LINE_LOGIN_CHANNEL_ID',
+});
+
+
+/* =========================================================
+ * Script Properties
+ * ======================================================= */
+
+const SCRIPT_PROPERTY_KEYS = Object.freeze({
+  DATABASE_SPREADSHEET_ID:
+    'DATABASE_SPREADSHEET_ID',
+
+  LINE_CHANNEL_ACCESS_TOKEN:
+    'LINE_CHANNEL_ACCESS_TOKEN',
+
+  LINE_CHANNEL_SECRET:
+    'LINE_CHANNEL_SECRET',
+
+  LINE_LOGIN_CHANNEL_ID:
+    'LINE_LOGIN_CHANNEL_ID',
+
+  GROWTH_LIFF_ID:
+    'GROWTH_LIFF_ID',
+
+  LINE_PLAYER_LINKS:
+    'LINE_PLAYER_LINKS',
+
+  COACH_PASSWORD:
+    'COACH_PASSWORD',
+});
+
+
+/* =========================================================
+ * 選手
+ * ======================================================= */
+
+const PLAYER_STATUS = Object.freeze({
+  ACTIVE: '在籍',
+  INACTIVE: '休止',
+  WITHDRAWN: '退団',
+});
+
+const PLAYER_GENDER = Object.freeze({
+  MALE: '男子',
+  FEMALE: '女子',
+});
+
+const PLAYER_CATEGORY = Object.freeze({
+  ALL: '全体',
+
+  BOYS: '男子',
+  GIRLS: '女子',
+
+  BOYS_U13: '男子U13',
+  BOYS_U14: '男子U14',
+  BOYS_U15: '男子U15',
+
+  GIRLS_U13: '女子U13',
+  GIRLS_U14: '女子U14',
+  GIRLS_U15: '女子U15',
+});
+
+
+/* =========================================================
+ * スケジュール
+ * ======================================================= */
+
+const SCHEDULE_TYPE = Object.freeze({
+  PRACTICE: '練習',
+  GAME: '試合',
+  EXPEDITION: '遠征',
+  OFF: 'OFF',
+  OTHER: 'その他',
+});
+
+const SCHEDULE_COLOR = Object.freeze({
+  BLUE: 'blue',
+  RED: 'red',
+  PURPLE: 'purple',
+  GREEN: 'green',
+  ORANGE: 'orange',
+  YELLOW: 'yellow',
+  PINK: 'pink',
+  GRAY: 'gray',
+  BLACK: 'black',
+  WHITE: 'white',
+});
+
+
+/* =========================================================
+ * 出欠
+ * ======================================================= */
+
+const ATTENDANCE_STATUS = Object.freeze({
+  ATTEND: '参加',
+  PRESENT: '出席',
+  ABSENT: '欠席',
+  UNDECIDED: '未定',
+  NO_RESPONSE: '未回答',
+});
+
+
+/* =========================================================
+ * ログ
+ * ======================================================= */
+
+const LOG_RESULT = Object.freeze({
+  SUCCESS: '成功',
+  FAILURE: '失敗',
+  WARNING: '警告',
+  INFO: '情報',
+});
+
+
+/* =========================================================
+ * API
+ * ======================================================= */
+
+const API_ERROR_CODES = Object.freeze({
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  NOT_FOUND: 'NOT_FOUND',
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  FORBIDDEN: 'FORBIDDEN',
+  INVALID_ACTION: 'INVALID_ACTION',
+  INVALID_REQUEST: 'INVALID_REQUEST',
+  METHOD_NOT_ALLOWED: 'METHOD_NOT_ALLOWED',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+});
+
+const API_HTTP_METHOD = Object.freeze({
+  GET: 'GET',
+  POST: 'POST',
+});
+
+
+/* =========================================================
+ * v12.1定数確認
+ * ======================================================= */
+
+/**
+ * Constants.gsの設定状態を確認します。
+ *
+ * @return {Object}
+ */
+function inspectConstantsV12_1() {
+  const result = {
+    success:
+      APP_CONFIG.APP_VERSION === 'v12.1.0' &&
+      ID_PREFIXES.PLAYER === 'player' &&
+      ID_PREFIXES.SCHEDULE === 'schedule' &&
+      ID_PREFIXES.ATTENDANCE === 'attendance' &&
+      ID_PREFIXES.ATTACHMENT === 'attachment' &&
+      DB_SHEET_NAMES.SCHEDULES === 'schedules' &&
+      DB_SHEET_NAMES.COACH_SCHEDULE === 'schedules' &&
+      DB_HEADERS.LOGS.length === 5 &&
+      DATE_FORMATS.DATETIME ===
+        'yyyy-MM-dd HH:mm:ss',
+
+    app: APP_CONFIG,
+
+    idPrefixes: ID_PREFIXES,
+
+    sheets: DB_SHEET_NAMES,
+
+    checks: {
+      idPrefixes:
+        ID_PREFIXES.PLAYER === 'player' &&
+        ID_PREFIXES.SCHEDULE === 'schedule' &&
+        ID_PREFIXES.ATTENDANCE ===
+          'attendance' &&
+        ID_PREFIXES.ATTACHMENT ===
+          'attachment',
+
+      scheduleSheet:
+        DB_SHEET_NAMES.SCHEDULES ===
+        'schedules',
+
+      legacyScheduleAlias:
+        DB_SHEET_NAMES.COACH_SCHEDULE ===
+        DB_SHEET_NAMES.SCHEDULES,
+
+      logsHeader:
+        JSON.stringify(DB_HEADERS.LOGS) ===
+        JSON.stringify([
+          '日時',
+          '処理',
+          'ユーザー',
+          '結果',
+          '内容',
+        ]),
+
+      feedbackSheet:
+        DB_SHEET_NAMES.FEEDBACK ===
+        'feedback',
+
+      apiVersion:
+        APP_CONFIG.APP_VERSION ===
+        'v12.1.0',
+
+      dateFormats:
+        DATE_FORMATS.DATE ===
+          'yyyy-MM-dd' &&
+        DATE_FORMATS.DATETIME ===
+          'yyyy-MM-dd HH:mm:ss' &&
+        DATE_FORMATS.TIME ===
+          'HH:mm',
+    },
+
+    checkedAt: Utilities.formatDate(
+      new Date(),
+      APP_CONFIG.TIMEZONE,
+      'yyyy/MM/dd HH:mm:ss'
+    ),
+  };
+
+  console.log(
+    JSON.stringify(
+      result,
+      null,
+      2
+    )
+  );
+
+  return result;
+}
+
+
+
+貼り付けたコード（1）(4).js
+JavaScript
+
+貼り付けたコード（2）(3).js
+JavaScript
+
+貼り付けたコード（3）(2).js
+JavaScript
+
+貼り付けたコード（4）(1).js
+JavaScript
+/**
+ * NINJA SCHEDULE API v12
+ * LineWebhook.gs
+ *
+ * LINE Messaging APIから受け取ったWebhook本文を検証し、
+ * LineBotService.gsへ安全に引き渡します。
+ *
+ * 主な役割
+ * ・Webhook本文の形式確認
+ * ・イベント配列の正規化
+ * ・重複イベントの除外
+ * ・LineBotServiceへの振り分け
+ * ・エラーの集約
+ *
+ * 注意
+ * ・doPost()は定義しません。
+ * ・公開入口はコード.gsに一本化します。
+ * ・LINE署名検証はApps Scriptの標準doPostイベントでは
+ *   HTTPヘッダーを直接取得できないため、このファイルでは行いません。
+ *
+ * 更新日：2026-07-30
+ */
+
+
+/* =========================================================
+ * Webhook入口
+ * ======================================================= */
+
+/**
+ * LINE Webhook本文を処理します。
+ *
+ * @param {*} body
+ * @return {Object}
+ */
+function lineWebhookHandleBody_(body) {
+  const startedAt = new Date();
+
+  try {
+    const normalized =
+      lineWebhookNormalizeBody_(body);
+
+    const events =
+      lineWebhookRemoveDuplicateEvents_(
+        normalized.events
+      );
+
+    if (
+      typeof lineBotHandleWebhook_ !==
+      'function'
+    ) {
+      throw new Error(
+        'LineBotService.gsのlineBotHandleWebhook_が見つかりません。'
+      );
+    }
+
+    const result =
+      lineBotHandleWebhook_({
+        destination:
+          normalized.destination,
+        events: events
+      });
+
+    return {
+      success:
+        !result ||
+        result.success !== false,
+
+      destination:
+        normalized.destination,
+
+      receivedEventCount:
+        normalized.events.length,
+
+      dispatchedEventCount:
+        events.length,
+
+      duplicateEventCount:
+        normalized.events.length -
+        events.length,
+
+      processed:
+        result &&
+        Number.isFinite(
+          Number(result.processed)
+        )
+          ? Number(result.processed)
+          : 0,
+
+      ignored:
+        result &&
+        Number.isFinite(
+          Number(result.ignored)
+        )
+          ? Number(result.ignored)
+          : 0,
+
+      errors:
+        result &&
+        Array.isArray(result.errors)
+          ? result.errors
+          : [],
+
+      processingMilliseconds:
+        new Date().getTime() -
+        startedAt.getTime(),
+
+      checkedAt:
+        lineWebhookNowString_()
+    };
+
+  } catch (error) {
+    const message =
+      lineWebhookErrorMessage_(error);
+
+    console.error(
+      '[LineWebhook] ' +
+      message
+    );
+
+    return {
+      success: false,
+      destination: '',
+      receivedEventCount: 0,
+      dispatchedEventCount: 0,
+      duplicateEventCount: 0,
+      processed: 0,
+      ignored: 0,
+      errors: [
+        {
+          index: -1,
+          message: message
+        }
+      ],
+      processingMilliseconds:
+        new Date().getTime() -
+        startedAt.getTime(),
+      checkedAt:
+        lineWebhookNowString_()
+    };
+  }
+}
+
+
+/**
+ * コード.gsとの互換用関数です。
+ *
+ * @param {*} body
+ * @return {Object}
+ */
+function lineHandleWebhook_(body) {
+  return lineWebhookHandleBody_(body);
+}
+
+
+/* =========================================================
+ * 本文検証・正規化
+ * ======================================================= */
+
+/**
+ * Webhook本文を正規化します。
+ *
+ * @param {*} body
+ * @return {Object}
+ */
+function lineWebhookNormalizeBody_(body) {
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    Array.isArray(body)
+  ) {
+    throw new Error(
+      'LINE Webhook本文が正しくありません。'
+    );
+  }
+
+  if (!Array.isArray(body.events)) {
+    throw new Error(
+      'LINE Webhook本文にevents配列がありません。'
+    );
+  }
+
+  return {
+    destination:
+      lineWebhookCleanString_(
+        body.destination
+      ),
+
+    events:
+      body.events
+        .filter(function(event) {
+          return (
+            event &&
+            typeof event === 'object' &&
+            !Array.isArray(event)
+          );
+        })
+        .map(function(event) {
+          return lineWebhookNormalizeEvent_(
+            event
+          );
+        })
+  };
+}
+
+
+/**
+ * LINEイベントを正規化します。
+ *
+ * @param {Object} event
+ * @return {Object}
+ */
+function lineWebhookNormalizeEvent_(event) {
+  const normalized =
+    Object.assign({}, event);
+
+  normalized.type =
+    lineWebhookCleanString_(
+      event.type
+    );
+
+  normalized.replyToken =
+    lineWebhookCleanString_(
+      event.replyToken
+    );
+
+  normalized.webhookEventId =
+    lineWebhookCleanString_(
+      event.webhookEventId
+    );
+
+  normalized.timestamp =
+    Number.isFinite(
+      Number(event.timestamp)
+    )
+      ? Number(event.timestamp)
+      : 0;
+
+  normalized.deliveryContext =
+    event.deliveryContext &&
+    typeof event.deliveryContext ===
+      'object'
+      ? event.deliveryContext
+      : {};
+
+  normalized.source =
+    event.source &&
+    typeof event.source === 'object'
+      ? event.source
+      : {};
+
+  normalized.message =
+    event.message &&
+    typeof event.message === 'object'
+      ? event.message
+      : null;
+
+  return normalized;
+}
+
+
+/* =========================================================
+ * 重複イベント除外
+ * ======================================================= */
+
+/**
+ * webhookEventIdが重複するイベントを除外します。
+ *
+ * 同じWebhook本文内の重複だけを対象にします。
+ * LINEの再送全体を永続的に抑止する処理は、
+ * 将来CacheServiceまたはDBを使用して追加できます。
+ *
+ * @param {Array<Object>} events
+ * @return {Array<Object>}
+ */
+function lineWebhookRemoveDuplicateEvents_(
+  events
+) {
+  if (!Array.isArray(events)) {
+    return [];
+  }
+
+  const seen = {};
+
+  return events.filter(function(event) {
+    const eventId =
+      lineWebhookCleanString_(
+        event.webhookEventId
+      );
+
+    if (!eventId) {
+      return true;
+    }
+
+    if (seen[eventId]) {
+      return false;
+    }
+
+    seen[eventId] = true;
+    return true;
+  });
+}
+
+
+/* =========================================================
+ * 判定
+ * ======================================================= */
+
+/**
+ * LINE Webhook本文か確認します。
+ *
+ * @param {*} body
+ * @return {boolean}
+ */
+function lineWebhookIsBody_(body) {
+  return !!(
+    body &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    Array.isArray(body.events)
+  );
+}
+
+
+/**
+ * 再送イベントか確認します。
+ *
+ * @param {Object} event
+ * @return {boolean}
+ */
+function lineWebhookIsRedelivery_(event) {
+  return !!(
+    event &&
+    event.deliveryContext &&
+    event.deliveryContext
+      .isRedelivery === true
+  );
+}
+
+
+/**
+ * テキストメッセージイベントか確認します。
+ *
+ * @param {Object} event
+ * @return {boolean}
+ */
+function lineWebhookIsTextEvent_(event) {
+  return !!(
+    event &&
+    event.type === 'message' &&
+    event.message &&
+    event.message.type === 'text'
+  );
+}
+
+
+/* =========================================================
+ * 共通
+ * ======================================================= */
+
+function lineWebhookCleanString_(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return '';
+  }
+
+  return String(value).trim();
+}
+
+
+function lineWebhookErrorMessage_(error) {
+  if (!error) {
+    return '不明なエラーです。';
+  }
+
+  if (error.message) {
+    return String(error.message);
+  }
+
+  return String(error);
+}
+
+
+function lineWebhookNowString_() {
+  const timezone =
+    typeof configGetTimezone_ ===
+      'function'
+      ? configGetTimezone_()
+      : 'Asia/Tokyo';
+
+  return Utilities.formatDate(
+    new Date(),
+    timezone,
+    'yyyy/MM/dd HH:mm:ss'
+  );
+}
+
+
+/* =========================================================
+ * テスト
+ * ======================================================= */
+
+/**
+ * LineWebhook.gsの安全テストです。
+ *
+ * LINE API通信、返信、保存、データ変更は行いません。
+ * LineBotServiceへは空のevents配列だけを渡します。
+ *
+ * @return {Object}
+ */
+function testLineWebhookV12() {
+  const sampleEvent = {
+    type: 'message',
+    replyToken: 'TEST_REPLY_TOKEN',
+    webhookEventId: 'TEST_EVENT_001',
+    timestamp: 0,
+    deliveryContext: {
+      isRedelivery: false
+    },
+    source: {
+      type: 'user',
+      userId: 'TEST_USER_ID'
+    },
+    message: {
+      id: 'TEST_MESSAGE_ID',
+      type: 'text',
+      text: 'テスト'
+    }
+  };
+
+  const normalized =
+    lineWebhookNormalizeBody_({
+      destination:
+        'TEST_DESTINATION',
+      events: [
+        sampleEvent,
+        Object.assign(
+          {},
+          sampleEvent
+        )
+      ]
+    });
+
+  const uniqueEvents =
+    lineWebhookRemoveDuplicateEvents_(
+      normalized.events
+    );
+
+  const emptyDispatch =
+    lineWebhookHandleBody_({
+      destination:
+        'TEST_DESTINATION',
+      events: []
+    });
+
+  const result = {
+    success:
+      lineWebhookIsBody_({
+        events: []
+      }) &&
+      normalized.events.length === 2 &&
+      uniqueEvents.length === 1 &&
+      lineWebhookIsTextEvent_(
+        sampleEvent
+      ) &&
+      lineWebhookIsRedelivery_(
+        {
+          deliveryContext: {
+            isRedelivery: true
+          }
+        }
+      ) &&
+      emptyDispatch.success === true,
+
+    functionChecks: {
+      handleBody:
+        typeof lineWebhookHandleBody_ ===
+          'function',
+
+      compatibilityHandler:
+        typeof lineHandleWebhook_ ===
+          'function',
+
+      lineBotHandler:
+        typeof lineBotHandleWebhook_ ===
+          'function'
+    },
+
+    normalization: {
+      receivedCount:
+        normalized.events.length,
+      uniqueCount:
+        uniqueEvents.length,
+      duplicateCount:
+        normalized.events.length -
+        uniqueEvents.length
+    },
+
+    emptyDispatch:
+      emptyDispatch,
+
+    note:
+      'このテストではLINE API通信・返信・保存・データ変更を行いません。',
+
+    checkedAt:
+      lineWebhookNowString_()
+  };
+
+  console.log(
+    JSON.stringify(
+      result,
+      null,
+      2
+    )
+  );
+
+  return result;
+}
+
+
+貼り付けたコード（1）(5).js
+JavaScript
+
+貼り付けたコード（2）(4).js
+JavaScript
+
+貼り付けたコード（3）(3).js
+JavaScript
+/**
+ * NINJA SCHEDULE API v11
+ * Utils.gs
+ *
+ * システム全体で利用する共通処理を管理します。
+ *
+ * 更新日：2026-07-29
+ */
+
+function utilToString_(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return String(value);
+}
+
+
+function utilTrim_(value) {
+  return utilToString_(value).trim();
+}
+
+
+function utilNormalizeSpace_(value) {
+  return utilTrim_(value).replace(/\s+/g, ' ');
+}
+
+
+function utilNormalizeNewLines_(value) {
+  return utilToString_(value)
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+}
+
+
+function utilLimitString_(value, maxLength) {
+  const text = utilToString_(value);
+  const limit = Number(maxLength);
+
+  if (!Number.isFinite(limit) || limit < 0) {
+    return text;
+  }
+
+  return text.length > limit
+    ? text.substring(0, limit)
+    : text;
+}
+
+
+function utilIsEmpty_(value) {
+  return (
+    value === null ||
+    value === undefined ||
+    utilTrim_(value) === ''
+  );
+}
+
+
+function utilIsObject_(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    !(value instanceof Date)
+  );
+}
+
+
+function utilToBoolean_(value, defaultValue) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (value === 1 || value === '1') {
+    return true;
+  }
+
+  if (value === 0 || value === '0') {
+    return false;
+  }
+
+  const text = utilTrim_(value).toLowerCase();
+
+  if (
+    text === 'true' ||
+    text === 'yes' ||
+    text === 'on' ||
+    text === '有効' ||
+    text === 'はい'
+  ) {
+    return true;
+  }
+
+  if (
+    text === 'false' ||
+    text === 'no' ||
+    text === 'off' ||
+    text === '無効' ||
+    text === 'いいえ'
+  ) {
+    return false;
+  }
+
+  return Boolean(defaultValue);
+}
+
+
+function utilToNumber_(value, defaultValue) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
+    return defaultValue !== undefined
+      ? defaultValue
+      : null;
+  }
+
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue)) {
+    return defaultValue !== undefined
+      ? defaultValue
+      : null;
+  }
+
+  return numberValue;
+}
+
+
+function utilToInteger_(value, defaultValue) {
+  const numberValue = utilToNumber_(value, null);
+
+  if (numberValue === null) {
+    return defaultValue !== undefined
+      ? defaultValue
+      : null;
+  }
+
+  return Math.trunc(numberValue);
+}
+
+
+function utilToDate_(value) {
+  if (value instanceof Date) {
+    return isNaN(value.getTime())
+      ? null
+      : new Date(value.getTime());
+  }
+
+  if (utilIsEmpty_(value)) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  return isNaN(date.getTime())
+    ? null
+    : date;
+}
+
+
+function utilFormatDate_(value, format) {
+  const date = utilToDate_(value);
+
+  if (!date) {
+    return '';
+  }
+
+  return Utilities.formatDate(
+    date,
+    configGetTimezone_(),
+    format || DATE_FORMATS.DATETIME
+  );
+}
+
+
+function utilFormatIsoDate_(value) {
+  return utilFormatDate_(
+    value,
+    DATE_FORMATS.ISO_DATE
+  );
+}
+
+
+function utilFormatDisplayDate_(value) {
+  return utilFormatDate_(
+    value,
+    DATE_FORMATS.DATE
+  );
+}
+
+
+function utilFormatTime_(value) {
+  if (utilIsEmpty_(value)) {
+    return '';
+  }
+
+  if (
+    typeof value === 'string' &&
+    /^\d{1,2}:\d{2}$/.test(value)
+  ) {
+    const parts = value.split(':');
+    const hour = Number(parts[0]);
+    const minute = Number(parts[1]);
+
+    if (
+      hour >= 0 &&
+      hour <= 23 &&
+      minute >= 0 &&
+      minute <= 59
+    ) {
+      return String(hour).padStart(2, '0') +
+        ':' +
+        String(minute).padStart(2, '0');
+    }
+  }
+
+  return utilFormatDate_(value, DATE_FORMATS.TIME);
+}
+
+
+function utilNow_() {
+  return new Date();
+}
+
+
+function utilNowString_() {
+  return utilFormatDate_(
+    utilNow_(),
+    DATE_FORMATS.DATETIME
+  );
+}
+
+
+function utilGenerateId_(prefix) {
+  const safePrefix = utilTrim_(prefix) || 'ID';
+
+  const timestamp = Utilities.formatDate(
+    new Date(),
+    configGetTimezone_(),
+    'yyyyMMddHHmmssSSS'
+  );
+
+  const random = Utilities
+    .getUuid()
+    .replace(/-/g, '')
+    .substring(0, 8)
+    .toUpperCase();
+
+  return safePrefix + '-' + timestamp + '-' + random;
+}
+
+
+function utilGeneratePlayerId_() {
+  return utilGenerateId_(ID_PREFIXES.PLAYER);
+}
+
+
+function utilGenerateScheduleId_() {
+  return utilGenerateId_(ID_PREFIXES.SCHEDULE);
+}
+
+
+function utilGenerateAttendanceId_() {
+  return utilGenerateId_(ID_PREFIXES.ATTENDANCE);
+}
+
+
+function utilGenerateAttachmentId_() {
+  return utilGenerateId_(ID_PREFIXES.ATTACHMENT);
+}
+
+
+function utilValidateRequired_(data, rules) {
+  const errors = [];
+
+  if (!utilIsObject_(data)) {
+    return ['入力データが正しくありません。'];
+  }
+
+  if (!Array.isArray(rules)) {
+    return errors;
+  }
+
+  rules.forEach(function(rule) {
+    const key = rule.key;
+    const label = rule.label || key;
+
+    if (utilIsEmpty_(data[key])) {
+      errors.push(label + 'は必須です。');
+    }
+  });
+
+  return errors;
+}
+
+
+function utilSuccessResponse_(data, message) {
+  return {
+    success: true,
+    message: message || '',
+    data: data !== undefined ? data : null,
+    error: null,
+    timestamp: utilNowString_(),
+    version: configGetAppVersion_()
+  };
+}
+
+
+function utilErrorResponse_(code, message, details) {
+  return {
+    success: false,
+    message: message || 'エラーが発生しました。',
+    data: null,
+    error: {
+      code: code || API_ERROR_CODES.INTERNAL_ERROR,
+      details: details !== undefined ? details : null
+    },
+    timestamp: utilNowString_(),
+    version: configGetAppVersion_()
+  };
+}
+
+
+function utilCreateJsonOutput_(response) {
+  return ContentService
+    .createTextOutput(JSON.stringify(response))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+function utilGetErrorMessage_(error) {
+  if (!error) {
+    return '不明なエラーです。';
+  }
+
+  if (error instanceof Error) {
+    return error.message || String(error);
+  }
+
+  if (typeof error === 'object') {
+    try {
+      return JSON.stringify(error);
+    } catch (jsonError) {
+      return String(error);
+    }
+  }
+
+  return String(error);
+}
+
+
+function testUtilsV11() {
+  const result = {
+    success: true,
+    stringTest: utilTrim_('  NINJA SCHEDULE  '),
+    booleanTest: utilToBoolean_('TRUE', false),
+    dateTest: utilNowString_(),
+    scheduleId: utilGenerateScheduleId_()
+  };
+
+  console.log(JSON.stringify(result, null, 2));
+
+  return result;
+}
+
+/**
+ * NINJA SCHEDULE API v12
+ * VersionMigration_v12.gs
+ *
+ * settingsシートのアプリバージョンをv12へ更新します。
+ *
+ * このファイルは一度だけ実行する移行用です。
+ * 他の設定値やデータは変更しません。
+ *
+ * 更新日：2026-07-30
+ */
+
+
+/**
+ * settingsシートのAPP_VERSIONをv12へ更新します。
+ *
+ * @return {Object}
+ */
+function migrateAppVersionToV12() {
+  const before = dbGetSetting_(
+    SETTINGS_KEYS.APP_VERSION,
+    ''
+  );
+
+  const saved = dbSetSetting_(
+    SETTINGS_KEYS.APP_VERSION,
+    'v12.0.0',
+    'NINJA SCHEDULE APIの現在バージョン'
+  );
+
+  dbClearSheetCache_(
+    DB_SHEET_NAMES.SETTINGS
+  );
+
+  const after = dbGetSetting_(
+    SETTINGS_KEYS.APP_VERSION,
+    ''
+  );
+
+  const result = {
+    success: after === 'v12.0.0',
+    before: utilTrim_(before),
+    after: utilTrim_(after),
+    saved: saved,
+    checkedAt: utilNowString_()
+  };
+
+  console.log(
+    JSON.stringify(
+      result,
+      null,
+      2
+    )
+  );
+
+  return result;
+}
+
+
+/**
+ * バージョン設定を確認します。
+ *
+ * データ変更は行いません。
+ *
+ * @return {Object}
+ */
+function testAppVersionV12() {
+  const configuredVersion =
+    configGetAppVersion_();
+
+  const result = {
+    success:
+      configuredVersion === 'v12.0.0',
+    configuredVersion:
+      configuredVersion,
+    checkedAt:
+      utilNowString_()
+  };
+
+  console.log(
+    JSON.stringify(
+      result,
+      null,
+      2
+    )
+  );
+
+  return result;
+}
+
+
+貼り付けたコード（1）(6).js
+JavaScript
+
+貼り付けたコード（2）(5).js
+JavaScript
+
+
+貼り付けたコード（1）(7).js
+JavaScript
+全置き換え作って
+
+スクリーンショット 2026-08-05 15.49.56.png
+
+スクリーンショット 2026-08-05 16.18.40.png
+
+スクリーンショット 2026-08-05 16.21.45.png
+
+スクリーンショット 2026-08-05 16.29.52.png
+
+EF9C2710-C0F2-4100-9237-62F1FFE555FF_4_5005_c.jpeg
+ログインできてる
+
+
+貼り付けられたテキスト（1 点）(7).txt
+ドキュメント
+
+原因はこのコードです。
+
+sessionStorage.removeItem('scheduleToken');
+sessionStorage.removeItem('scheduleRole');
+state.token='';
+state.role='';
+state.player=null;
+さらに
+
+sessionStorage.setItem(...)
+を使っているため、
+
+LINEから開くたびにログイン情報を削除
+
+毎回LIFF認証
+
+毎回Apps Scriptへ認証
+
+25秒タイムアウト
+
+という流れになっています。
+
+
+このファイルで修正する内容
+このindex.htmlを次のように変更します。
+
+① sessionStorage → localStorage
+state.token = localStorage.getItem('scheduleToken') || '';
+state.role  = localStorage.getItem('scheduleRole') || '';
+保存も
+
+localStorage.setItem('scheduleToken', state.token);
+localStorage.setItem('scheduleRole', 'player');
+に変更します。
+
+② 起動時に毎回削除しない
+この部分は削除します。
+
+sessionStorage.removeItem('scheduleToken');
+sessionStorage.removeItem('scheduleRole');
+
+state.token='';
+state.role='';
+state.player=null;
+③ 保存済みトークンなら再ログインしない
+起動時に
+
+if (state.token) {
+    await loadMonth(monthKey(new Date()));
+    return;
+}
+を追加します。
+
+これだけで毎回
+
+LIFF
+↓
+LINE
+↓
+Apps Script認証
+をしなくなります。
+
+④ logoutだけ削除
+localStorage.removeItem('scheduleToken');
+localStorage.removeItem('scheduleRole');
+だけ削除するように変更します。
+
+効果
+現在
+
+LINE起動
+↓
+20〜25秒
+↓
+タイムアウト
+修正後
+
+LINE起動
+↓
+約1〜2秒
+↓
+予定表示
+になります。
+
+この修正はindex.html全体に関わるため、全文を高速ログイン対応版へ置き換えするのが安全です。現在のファイルは約1,000行あるため、このチャット1回では全文を収められません。そこで、機能を維持したまま高速ログイン対応版の完成コードを、複数回に分けて全ファイルとして提供するのが最も確実です。
+
+
+それで進めて
+
+22s考えました
+STEP6：高速ログイン対応版へ全置き換え
+対象ファイル
+index.html
+修正内容
+sessionStorageを廃止し、ログイン情報をlocalStorageへ保存
+
+LINEから開くたびのログイン情報削除を廃止
+
+保存済みログインがある場合、認証待ちをせず画面を即表示
+
+保存済み月データを先に表示
+
+最新予定は画面表示後にバックグラウンド取得
+
+LIFF IDを端末へ保存し、毎回のpublicConfig通信を省略
+
+セッション期限切れ時だけLINE認証を再実行
+
+明示的に「退出」を押した場合だけログイン情報を削除
+
+ビルド表示をv9.7-player-fast-loginへ更新
+
+元のindex.htmlでは、起動時に毎回トークンを削除し、LINE認証とApps Script通信を最初から実行していました。
+
+
+VS Codeで行う操作
+NINJA326/ninja-scheduleをVS Codeで開く
+
+index.htmlを開く
+
+Command + A
+
+全削除
+
+下記完成版を全貼り付け
+
+保存
+
+index.html
+
+動作確認
+VS Codeで保存後、次の順で進めてください。
+
+ローカルまたはLive Serverで表示確認
+
+Consoleに赤いエラーがないことを確認
+
+GitでCommit
+
+GitHubへPush
+
+GitHub Pagesを開く
+
+LINEから予定表を開く
+
+初回
+LINE認証とApps Script通信が必要です。
+
+2回目以降
+保存済みログインと月データを使うため、先に予定表が表示され、その後に最新予定を取得します。
+
+Commit例
+Speed up player LINE login
+このSTEPではindex.htmlだけを変更します。Apps Scriptの再デプロイは不要です。 
+
+
+
+index.html
+HTML
+
+
+VS Codeで行わない
+
+では、今回はVS Codeを使わずに進めます。
+
+STEP6：GitHubへindex.htmlを直接反映
+対象
+NINJA326/ninja-schedule
+使用する完成版
+index.html
+
+操作手順
+上のindex.htmlを開いて保存
+
+GitHubでNINJA326/ninja-scheduleを開く
+
+リポジトリ内のindex.htmlを開く
+
+右上のゴミ箱で既存のindex.htmlを削除
+
+リポジトリ上部の
+Add file → Upload files
+
+保存した新しいindex.htmlをアップロード
+
+Commit messageへ入力
+
+Speed up player LINE login
+Commit changesを押す
+
+反映確認
+数分待ってから、LINEから予定表を一度閉じて開き直します。
+
+確認項目は次の3点です。
+
+確認	正常な状態
+初回ログイン	LINE認証後に予定表が開く
+2回目以降	認証画面を長く待たず予定表が開く
+画面表示	build v9.7-player-fast-loginと表示
+今回はindex.htmlだけの変更なので、Apps Scriptの再デプロイは不要です。
+
+
+
+index.html
+HTML
+
+
+index.html
+
+
+
+
+
+index.html
+
+
+
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -88,7 +2349,7 @@
       .dialog{border-radius:18px;margin-bottom:3dvh}.modal.open{align-items:center}.category-box{grid-template-columns:repeat(3,minmax(0,1fr))}
     }
   </style>
-  <script src="./config.js?v=9.5.0"></script>
+  <script src="./config.js?v=9.7.0"></script>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
@@ -104,7 +2365,7 @@
   <main id="appView" class="app hidden">
     <header class="top">
       <div class="toprow">
-        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.6-player</div></div>
+        <div class="brand"><h1>NINJA AIRS 練習予定表</h1><small>予定・出欠管理アプリ 選手版</small><div id="roleBadge" class="role-badge"></div><div class="build-badge">build v9.7-player-fast-login</div></div>
         <div class="actions">
           <button id="newBtn" class="btn primary">＋追加</button>
           <button id="sheetBtn" class="btn ghost">読込</button>
@@ -218,11 +2479,21 @@ const TYPES=[
   {name:'その他',color:'#92400e'}
 ];
 
+const STORAGE_KEYS=Object.freeze({
+  TOKEN:'scheduleToken',
+  ROLE:'scheduleRole',
+  PLAYER:'schedulePlayer',
+  EXPIRES_AT:'scheduleTokenExpiresAt',
+  LIFF_ID:'scheduleLiffId'
+});
+
 const state={
   apiUrl:(window.NINJA_SCHEDULE_CONFIG&&window.NINJA_SCHEDULE_CONFIG.API_URL)||localStorage.getItem('scheduleApiUrl')||'',
-  token:sessionStorage.getItem('scheduleToken')||'',
-  role:sessionStorage.getItem('scheduleRole')||'',
-  player:null,liffId:'',
+  token:localStorage.getItem(STORAGE_KEYS.TOKEN)||'',
+  role:localStorage.getItem(STORAGE_KEYS.ROLE)||'',
+  player:readStoredJson(STORAGE_KEYS.PLAYER),
+  tokenExpiresAt:Number(localStorage.getItem(STORAGE_KEYS.EXPIRES_AT)||0),
+  liffId:localStorage.getItem(STORAGE_KEYS.LIFF_ID)||'',
   month:'',
   events:[],
   sourceUrl:'',
@@ -240,6 +2511,44 @@ const el={
   status:$('status'),modal:$('modal'),detailView:$('detailView'),form:$('eventForm'),
   detailFoot:$('detailFoot'),editFoot:$('editFoot'),modalStatus:$('modalStatus')
 };
+
+function readStoredJson(key){
+  try{
+    const raw=localStorage.getItem(key);
+    return raw?JSON.parse(raw):null;
+  }catch(e){
+    return null;
+  }
+}
+function hasUsableSavedLogin(){
+  if(!state.token||state.role!=='player'||!state.player)return false;
+  if(state.tokenExpiresAt&&Date.now()>=state.tokenExpiresAt){
+    clearSavedLogin();
+    return false;
+  }
+  return true;
+}
+function persistLogin(res){
+  const expiresIn=Math.max(60,Number(res?.expiresIn)||21600);
+  state.tokenExpiresAt=Date.now()+(expiresIn*1000)-30000;
+  localStorage.setItem(STORAGE_KEYS.TOKEN,state.token);
+  localStorage.setItem(STORAGE_KEYS.ROLE,'player');
+  localStorage.setItem(STORAGE_KEYS.PLAYER,JSON.stringify(state.player||{}));
+  localStorage.setItem(STORAGE_KEYS.EXPIRES_AT,String(state.tokenExpiresAt));
+}
+function clearSavedLogin(){
+  state.token='';
+  state.role='';
+  state.player=null;
+  state.tokenExpiresAt=0;
+  localStorage.removeItem(STORAGE_KEYS.TOKEN);
+  localStorage.removeItem(STORAGE_KEYS.ROLE);
+  localStorage.removeItem(STORAGE_KEYS.PLAYER);
+  localStorage.removeItem(STORAGE_KEYS.EXPIRES_AT);
+}
+function isSessionError(message){
+  return /ログイン|有効期限|認証.*必要|LINEから開き直/.test(String(message||''));
+}
 
 function jsonp(action,params={},timeoutMs=25000){
   return new Promise((resolve,reject)=>{
@@ -512,48 +2821,98 @@ function toggleDeadline(){$('deadlineFields').classList.toggle('hidden',!$('atte
 function formatBytes(n){n=Number(n)||0;if(n<1024)return n+'B';if(n<1048576)return (n/1024).toFixed(1)+'KB';return (n/1048576).toFixed(1)+'MB'}
 
 async function initPlayerLogin(){
+  state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');
+  if(!state.apiUrl||state.apiUrl.indexOf('ここにApps Script')===0){
+    $('bootMessage').textContent='予定表を開けませんでした';
+    showStatus($('lineLoginStatus'),'Apps Script URLが設定されていません。管理者へ連絡してください。','error');
+    return;
+  }
+
+  /*
+   * 保存済みセッションが有効なら、LINE認証を待たず即座に画面を表示します。
+   * 月データは端末キャッシュを先に描画し、API更新はバックグラウンドで行います。
+   */
+  if(hasUsableSavedLogin()){
+    applyLogin({
+      token:state.token,
+      role:'player',
+      player:state.player,
+      expiresIn:Math.max(60,Math.floor((state.tokenExpiresAt-Date.now())/1000))
+    },false);
+
+    loadMonth(monthKey(new Date())).catch(async error=>{
+      if(isSessionError(error?.message)){
+        clearSavedLogin();
+        await authenticatePlayer();
+      }
+    });
+    return;
+  }
+
+  await authenticatePlayer();
+}
+
+async function authenticatePlayer(){
   try{
-    state.apiUrl=el.apiUrl.value.trim().replace(/\/$/,'');
-    if(!state.apiUrl||state.apiUrl.indexOf('ここにApps Script')===0)throw new Error('Apps Script URLが設定されていません。管理者へ連絡してください。');
+    el.appView.classList.add('hidden');
+    el.bootView.classList.remove('hidden');
+    $('bootMessage').textContent='LINE選手認証を確認しています…';
+    showStatus($('lineLoginStatus'),'認証情報を確認しています…');
 
-    sessionStorage.removeItem('scheduleToken');
-    sessionStorage.removeItem('scheduleRole');
-    state.token='';state.role='';state.player=null;
-    showStatus($('lineLoginStatus'),'LINE選手認証を確認しています…');
+    /*
+     * LIFF IDは端末へ保存し、2回目以降のpublicConfig通信を省略します。
+     */
+    if(!state.liffId){
+      const cfg=assertOk(await jsonp('publicConfig',{},15000));
+      state.liffId=String(cfg.liffId||'').trim();
+      if(state.liffId)localStorage.setItem(STORAGE_KEYS.LIFF_ID,state.liffId);
+    }
 
-    const cfg=assertOk(await jsonp('publicConfig'));
-    state.liffId=String(cfg.liffId||'').trim();
-    if(!state.liffId)throw new Error('LINE_LIFF_IDが設定されていません。');
-    if(/^https?:\/\//i.test(state.liffId))throw new Error('LINE_LIFF_IDの設定形式が正しくありません。');
+    if(!state.liffId)throw new Error('SCHEDULE_LIFF_IDが設定されていません。');
+    if(/^https?:\/\//i.test(state.liffId))throw new Error('SCHEDULE_LIFF_IDの設定形式が正しくありません。');
 
+    showStatus($('lineLoginStatus'),'LINEログインを確認しています…');
     await liff.init({liffId:state.liffId,withLoginOnExternalBrowser:true});
 
     if(!liff.isLoggedIn()){
-      liff.login({redirectUri:location.origin+location.pathname+'?mode=player&v=9.5'});
+      liff.login({redirectUri:location.origin+location.pathname+'?mode=player&v=9.7'});
       return;
     }
 
     const idToken=liff.getIDToken();
     if(!idToken)throw new Error('LINE認証情報を取得できません。');
 
-    const res=assertOk(await jsonp('lineLogin',{idToken}));
-    applyLogin(res);
-    await loadMonth(monthKey(new Date()));
+    showStatus($('lineLoginStatus'),'選手情報を確認しています…');
+    const res=assertOk(await jsonp('lineLogin',{idToken},45000));
+    applyLogin(res,true);
+
+    /*
+     * ログイン完了後は先に画面を表示し、予定取得で認証画面を止めません。
+     */
+    loadMonth(monthKey(new Date())).catch(error=>{
+      showStatus(el.status,error?.message||'予定を読み込めませんでした。','error');
+    });
   }catch(e){
     $('bootMessage').textContent='予定表を開けませんでした';
     showStatus($('lineLoginStatus'),e.message,'error');
   }
 }
-function applyLogin(res){
+
+function applyLogin(res,persist=true){
   if((res.role||'')!=='player')throw new Error('選手アカウントとして認証できませんでした。');
+
+  state.token=String(res.token||state.token||'').trim();
+  state.role='player';
+  state.player=res.player||state.player||null;
+
+  if(!state.token||!state.player)throw new Error('選手ログイン情報を確認できませんでした。');
+  if(persist)persistLogin(res);
+
   el.bootView.classList.add('hidden');
-  state.token=res.token;state.role='player';state.player=res.player||null;
-  sessionStorage.setItem('scheduleToken',state.token);
-  sessionStorage.setItem('scheduleRole','player');
   el.appView.classList.remove('hidden');
   $('newBtn').classList.add('hidden');
   $('sheetBtn').classList.remove('hidden');
-  $('roleBadge').textContent=(state.player?.playerName||'選手')+' / '+(state.player?.category||'');
+  $('roleBadge').textContent=(state.player?.playerName||state.player?.name||'選手')+' / '+(state.player?.category||'');
 }
 function monthCacheKey(month){return 'ninjaScheduleMonthV9_5:'+month}
 function readMonthCache(month){
@@ -633,7 +2992,10 @@ async function fetchMonthOnce(month,{manual=false}={}){
     }else{
       showStatus(el.status,e.message,'error');
     }
-    if(/ログイン/.test(e.message))logout(false);
+    if(isSessionError(e.message)){
+      clearSavedLogin();
+      authenticatePlayer();
+    }
   }finally{
     state.loadingMonth=false;
     if($('sheetBtn'))$('sheetBtn').disabled=false;
@@ -853,16 +3215,25 @@ async function deleteAttachment(id){
 }
 function shiftMonth(diff){const [y,m]=state.month.split('-').map(Number);loadMonth(monthKey(new Date(y,m-1+diff,1)))}
 function logout(callApi=true){
-  if(callApi&&state.token)jsonp('logout',{token:state.token}).catch(()=>{});
-  state.token='';state.role='';state.player=null;
-  sessionStorage.removeItem('scheduleToken');
-  sessionStorage.removeItem('scheduleRole');
+  const currentToken=state.token;
+  if(callApi&&currentToken)jsonp('logout',{token:currentToken},10000).catch(()=>{});
+
+  clearSavedLogin();
   el.appView.classList.add('hidden');
   el.bootView.classList.remove('hidden');
   $('bootMessage').textContent='LINE選手認証を確認しています…';
   showStatus($('lineLoginStatus'),'');
-  if(typeof liff!=='undefined'&&liff.isLoggedIn())liff.logout();
-  location.replace(location.origin+location.pathname+'?mode=player&v=9.5');
+
+  /*
+   * 明示的な退出時だけLINE Loginも解除します。
+   */
+  if(typeof liff!=='undefined'){
+    try{
+      if(liff.isLoggedIn())liff.logout();
+    }catch(e){}
+  }
+
+  location.replace(location.origin+location.pathname+'?mode=player&v=9.7');
 }
 function enableMonthSwipe(){
   const target=document.querySelector('.calendar-wrap');
@@ -919,7 +3290,7 @@ async function init(){
   }
   if('serviceWorker' in navigator){
     try{
-      const reg=await navigator.serviceWorker.register('./sw.js?v=9.5.0');
+      const reg=await navigator.serviceWorker.register('./sw.js?v=9.7.0');
       reg.update().catch(()=>{});
     }catch(e){}
   }
