@@ -2,10 +2,522 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>NINJA SCHEDULE TEST</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#07111f">
+  <title>NINJA AIRS 練習予定表 選手版</title>
+  <link rel="manifest" href="./manifest.json">
+  <style>
+    :root{
+      --bg:#07111f;--panel:#0f1d31;--panel2:#14263e;--line:#29415f;
+      --text:#f8fafc;--muted:#a9b8cb;--primary:#2563eb;--danger:#dc2626;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif}
+    button,select,input,textarea{font:inherit}
+    .hidden{display:none!important}
+    .screen{min-height:100dvh;padding:calc(14px + env(safe-area-inset-top)) 8px calc(14px + env(safe-area-inset-bottom))}
+    .boot{display:grid;place-items:center}
+    .card{width:min(430px,100%);padding:26px 20px;background:var(--panel);border:1px solid var(--line);border-radius:20px;text-align:center}
+    .card h1{margin:0 0 8px;font-size:30px}.card p{margin:0 0 12px;color:var(--muted)}
+    .status{min-height:20px;font-size:12px;line-height:1.5;color:var(--muted)}.status.error{color:#fecaca}.status.ok{color:#bbf7d0}
+    .btn{min-height:40px;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);font-weight:800;cursor:pointer}
+    .btn.primary{background:var(--primary);border-color:var(--primary)}.btn.danger{background:var(--danger);border-color:var(--danger)}
+    .app{width:min(1180px,100%);margin:auto;display:flex;flex-direction:column;gap:8px}
+    .topbar{display:flex;justify-content:space-between;gap:8px;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+    .topbar h1{margin:0;font-size:18px}.player{margin-top:4px;color:#bfdbfe;font-size:12px}.build{margin-top:3px;color:#64748b;font-size:10px}
+    .toolbar{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center}
+    .nav{display:flex;gap:5px}.month-title{margin:0;text-align:center;font-size:20px}
+    select{min-height:40px;max-width:150px;padding:7px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);font-weight:700}
+    .calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:30px repeat(6,minmax(82px,1fr));border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel)}
+    .dow{display:grid;place-items:center;border-right:1px solid var(--line);background:#0a1627;font-size:12px;font-weight:900}.dow:nth-child(7){border-right:0}.sun{color:#fca5a5}.sat{color:#93c5fd}
+    .day{min-width:0;padding:3px;border-top:1px solid var(--line);border-right:1px solid var(--line);overflow:hidden}.day:nth-child(7n){border-right:0}.day.out{opacity:.32}.day.today{box-shadow:inset 0 0 0 2px #60a5fa}
+    .day-number{display:block;margin-bottom:2px;font-size:11px;font-weight:900}
+    .event{display:block;width:100%;margin:2px 0;padding:3px 4px;border:0;border-radius:5px;color:#fff;text-align:left;font-size:9px;font-weight:800;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .modal{position:fixed;inset:0;z-index:50;display:none;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.72)}.modal.open{display:flex}
+    .dialog{width:min(680px,100%);max-height:92dvh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:20px 20px 0 0;overflow:hidden}
+    .dialog-head,.dialog-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:13px 15px;border-bottom:1px solid var(--line)}.dialog-foot{border-top:1px solid var(--line);border-bottom:0}
+    .dialog-head h2{margin:0;font-size:18px}.dialog-body{overflow:auto;padding:15px}
+    .detail{display:grid;grid-template-columns:92px 1fr;gap:10px;margin:0;font-size:14px}.detail dt{color:var(--muted);font-weight:900}.detail dd{margin:0;white-space:pre-wrap;word-break:break-word}
+    @media(max-width:760px){.month-title{font-size:18px}.calendar{grid-template-rows:28px repeat(6,minmax(72px,1fr))}.event{font-size:8px}.topbar{border-radius:0}}
+  </style>
+  <script src="./config.js?v=10.1.0"></script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
-  <h1>NINJA SCHEDULE TEST</h1>
-  <p>GitHub Pages deployment check</p>
+  <section id="bootView" class="screen boot">
+    <div class="card">
+      <h1>NINJA AIRS</h1>
+      <p id="bootMessage">LINE選手認証を確認しています…</p>
+      <div id="bootStatus" class="status"></div>
+      <button id="retryBtn" class="btn primary hidden" type="button" style="width:100%;margin-top:12px">再試行</button>
+    </div>
+  </section>
+
+  <main id="appView" class="screen hidden">
+    <div class="app">
+      <header class="topbar">
+        <div>
+          <h1>NINJA AIRS 練習予定表</h1>
+          <div id="playerInfo" class="player"></div>
+          <div class="build">build v10.1-clean</div>
+        </div>
+        <button id="logoutBtn" class="btn" type="button">退出</button>
+      </header>
+
+      <section class="toolbar">
+        <div class="nav">
+          <button id="prevBtn" class="btn" type="button">‹</button>
+          <button id="todayBtn" class="btn" type="button">今日</button>
+        </div>
+        <h2 id="monthTitle" class="month-title">--</h2>
+        <div class="nav">
+          <select id="categoryFilter">
+            <option value="ALL">全カテゴリー</option>
+            <option value="男子U13">男子U13</option>
+            <option value="男子U14">男子U14</option>
+            <option value="男子U15">男子U15</option>
+            <option value="女子U13">女子U13</option>
+            <option value="女子U14">女子U14</option>
+            <option value="女子U15">女子U15</option>
+          </select>
+          <button id="nextBtn" class="btn" type="button">›</button>
+        </div>
+      </section>
+
+      <div id="appStatus" class="status"></div>
+      <section id="calendar" class="calendar"></section>
+    </div>
+  </main>
+
+  <div id="detailModal" class="modal" aria-hidden="true">
+    <section class="dialog">
+      <header class="dialog-head">
+        <h2>予定詳細</h2>
+        <button id="closeModalBtn" class="btn" type="button">閉じる</button>
+      </header>
+      <div id="detailBody" class="dialog-body"></div>
+      <footer class="dialog-foot">
+        <span></span>
+        <button id="closeModalBottomBtn" class="btn" type="button">閉じる</button>
+      </footer>
+    </section>
+  </div>
+
+<script>
+'use strict';
+
+const RUNTIME_CONFIG = window.NINJA_SCHEDULE_CONFIG || {};
+const CONFIG = Object.freeze({
+  API_URL: String(RUNTIME_CONFIG.API_URL || '').trim(),
+  LIFF_ID: String(RUNTIME_CONFIG.LIFF_ID || '').trim(),
+  TOKEN_KEY: 'ninjaScheduleTokenV101',
+  PLAYER_KEY: 'ninjaSchedulePlayerV101',
+  EXPIRES_KEY: 'ninjaScheduleExpiresV101',
+  MONTH_CACHE_PREFIX: 'ninjaScheduleMonthV101:'
+});
+
+const state = {
+  token: localStorage.getItem(CONFIG.TOKEN_KEY) || '',
+  player: readJson(CONFIG.PLAYER_KEY),
+  expiresAt: Number(localStorage.getItem(CONFIG.EXPIRES_KEY) || 0),
+  month: '',
+  events: [],
+  category: 'ALL'
+};
+
+const $ = id => document.getElementById(id);
+
+function readJson(key){
+  try{
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  }catch{
+    return null;
+  }
+}
+
+function showStatus(node,message,type=''){
+  node.textContent = message || '';
+  node.className = 'status' + (type ? ' ' + type : '');
+}
+
+function wait(ms){
+  return new Promise(resolve => setTimeout(resolve,ms));
+}
+
+function jsonpOnce(action,params={},timeoutMs=25000){
+  return new Promise((resolve,reject)=>{
+    const callbackName = 'cb_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+    let settled = false;
+
+    const timer = setTimeout(
+      () => finish(new Error('通信がタイムアウトしました。')),
+      timeoutMs
+    );
+
+    function finish(error,data){
+      if(settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try{ delete window[callbackName]; }catch{ window[callbackName] = undefined; }
+      if(script.parentNode) script.parentNode.removeChild(script);
+      error ? reject(error) : resolve(data);
+    }
+
+    window[callbackName] = data => finish(null,data);
+
+    const query = new URLSearchParams({
+      ...params,
+      action,
+      callback: callbackName,
+      _: Date.now()
+    });
+
+    script.async = true;
+    script.onerror = () => finish(new Error('Apps Scriptへ接続できません。'));
+    script.src = CONFIG.API_URL + '?' + query.toString();
+    document.body.appendChild(script);
+  });
+}
+
+async function api(action,params={},timeoutMs=25000){
+  let lastError = null;
+
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      return unwrap(await jsonpOnce(action,params,timeoutMs));
+    }catch(error){
+      lastError = error;
+      if(attempt < 2) await wait(attempt === 0 ? 800 : 1800);
+    }
+  }
+
+  throw lastError || new Error('通信に失敗しました。');
+}
+
+function unwrap(response){
+  const payload = response && typeof response === 'object' ? response : {};
+  const ok = payload.success === true || payload.ok === true || payload.status === 'ok';
+
+  if(!ok){
+    throw new Error(payload.message || '処理に失敗しました。');
+  }
+
+  return payload.data !== undefined ? payload.data : payload;
+}
+
+function saveSession(result){
+  const expiresIn = Math.max(60,Number(result.expiresIn) || 21600);
+  state.token = String(result.token || '').trim();
+  state.player = result.player || null;
+  state.expiresAt = Date.now() + expiresIn * 1000 - 30000;
+
+  localStorage.setItem(CONFIG.TOKEN_KEY,state.token);
+  localStorage.setItem(CONFIG.PLAYER_KEY,JSON.stringify(state.player || {}));
+  localStorage.setItem(CONFIG.EXPIRES_KEY,String(state.expiresAt));
+}
+
+function clearSession(){
+  state.token = '';
+  state.player = null;
+  state.expiresAt = 0;
+  localStorage.removeItem(CONFIG.TOKEN_KEY);
+  localStorage.removeItem(CONFIG.PLAYER_KEY);
+  localStorage.removeItem(CONFIG.EXPIRES_KEY);
+}
+
+function hasValidSession(){
+  if(!state.token || !state.player) return false;
+  if(state.expiresAt && Date.now() >= state.expiresAt){
+    clearSession();
+    return false;
+  }
+  return true;
+}
+
+function showApp(){
+  $('bootView').classList.add('hidden');
+  $('appView').classList.remove('hidden');
+  $('playerInfo').textContent =
+    (state.player?.playerName || state.player?.name || '選手') +
+    ' / ' +
+    (state.player?.category || '');
+}
+
+function showBootError(message){
+  $('bootMessage').textContent = '予定表を開けませんでした';
+  showStatus($('bootStatus'),message,'error');
+  $('retryBtn').classList.remove('hidden');
+}
+
+async function authenticate(){
+  try{
+    $('retryBtn').classList.add('hidden');
+
+    if(!CONFIG.API_URL){
+      throw new Error('Apps Script URLが設定されていません。');
+    }
+
+    if(!CONFIG.LIFF_ID){
+      throw new Error('LIFF IDが設定されていません。');
+    }
+
+    showStatus($('bootStatus'),'LINEログインを確認しています…');
+
+    await liff.init({
+      liffId: CONFIG.LIFF_ID,
+      withLoginOnExternalBrowser: true
+    });
+
+    if(!liff.isLoggedIn()){
+      liff.login({
+        redirectUri: location.origin + location.pathname + '?v=1010'
+      });
+      return;
+    }
+
+    const idToken = liff.getIDToken();
+
+    if(!idToken){
+      throw new Error('LINE認証情報を取得できません。');
+    }
+
+    showStatus($('bootStatus'),'選手情報を確認しています…');
+
+    const result = await api('lineLogin',{idToken},45000);
+
+    if(String(result.role || '') !== 'player'){
+      throw new Error('選手アカウントとして認証できませんでした。');
+    }
+
+    saveSession(result);
+    showApp();
+    await loadMonth(monthKey(new Date()));
+
+  }catch(error){
+    showBootError(error.message || '認証に失敗しました。');
+  }
+}
+
+async function initLogin(){
+  if(hasValidSession()){
+    showApp();
+    try{
+      await loadMonth(monthKey(new Date()));
+      return;
+    }catch(error){
+      if(/ログイン|有効期限|認証/.test(error.message || '')){
+        clearSession();
+        $('appView').classList.add('hidden');
+        $('bootView').classList.remove('hidden');
+      }else{
+        showStatus($('appStatus'),error.message,'error');
+        return;
+      }
+    }
+  }
+
+  await authenticate();
+}
+
+function monthKey(date){
+  return date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0');
+}
+
+function dateKey(date){
+  return date.getFullYear() + '-' +
+    String(date.getMonth()+1).padStart(2,'0') + '-' +
+    String(date.getDate()).padStart(2,'0');
+}
+
+function normalizeEventList(payload){
+  if(Array.isArray(payload)) return payload;
+  if(Array.isArray(payload?.events)) return payload.events;
+  if(Array.isArray(payload?.schedules)) return payload.schedules;
+  if(Array.isArray(payload?.items)) return payload.items;
+  return [];
+}
+
+function escapeHtml(value){
+  return String(value ?? '').replace(/[&<>"']/g,char=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[char]));
+}
+
+function colorFor(event){
+  const map = {
+    '練習':'#2563eb',
+    '試合':'#dc2626',
+    '遠征':'#16a34a',
+    'OFF':'#6b7280',
+    '特別練習':'#ea580c',
+    'シューティング':'#0891b2'
+  };
+  return map[event.type] || '#7c3aed';
+}
+
+function eventCategories(event){
+  const value = event.categories || event.category || '';
+  if(Array.isArray(value)) return value.map(String);
+  return String(value).split(/[\/,、|]/).map(v=>v.trim()).filter(Boolean);
+}
+
+async function loadMonth(month){
+  state.month = month;
+  renderCalendar();
+  showStatus($('appStatus'),'予定を読み込んでいます…');
+
+  const [year,monthNumber] = month.split('-').map(Number);
+  const payload = await api(
+    'schedule.getByMonth',
+    {token:state.token,year,month:monthNumber},
+    30000
+  );
+
+  state.events = normalizeEventList(payload);
+  renderCalendar();
+  showStatus($('appStatus'),month.replace('-','年') + '月を読み込みました。','ok');
+}
+
+function filteredEvents(date){
+  return state.events.filter(event=>{
+    if(String(event.date || '') !== date) return false;
+    if(state.category === 'ALL') return true;
+    return eventCategories(event).includes(state.category);
+  });
+}
+
+function renderCalendar(){
+  const [year,monthNumber] = state.month.split('-').map(Number);
+  if(!year || !monthNumber) return;
+
+  $('monthTitle').textContent = `${year}年${String(monthNumber).padStart(2,'0')}月`;
+
+  const first = new Date(year,monthNumber-1,1);
+  const start = new Date(year,monthNumber-1,1-first.getDay());
+
+  let html = ['日','月','火','水','木','金','土']
+    .map((label,index)=>`<div class="dow ${index===0?'sun':index===6?'sat':''}">${label}</div>`)
+    .join('');
+
+  const today = dateKey(new Date());
+
+  for(let i=0;i<42;i++){
+    const date = new Date(start);
+    date.setDate(start.getDate()+i);
+
+    const key = dateKey(date);
+    const events = filteredEvents(key);
+    const outside = date.getMonth() !== monthNumber-1;
+
+    html += `
+      <div class="day ${outside?'out':''} ${key===today?'today':''}">
+        <span class="day-number">${date.getDate()}</span>
+        ${events.slice(0,4).map(event=>`
+          <button class="event" type="button"
+            data-id="${escapeHtml(event.scheduleId || '')}"
+            style="background:${colorFor(event)}">
+            ${escapeHtml((event.title || event.type || '予定') + ' ' + (event.startTime || ''))}
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  $('calendar').innerHTML = html;
+
+  $('calendar').querySelectorAll('[data-id]').forEach(button=>{
+    button.onclick = () => openEvent(button.dataset.id);
+  });
+}
+
+async function openEvent(scheduleId){
+  try{
+    const payload = await api(
+      'schedule.getById',
+      {token:state.token,scheduleId},
+      30000
+    );
+
+    const event = payload.schedule || payload.event || payload.item || payload;
+    const time = event.allDay
+      ? '終日'
+      : [event.startTime,event.endTime].filter(Boolean).join('〜') || '時間未設定';
+
+    $('detailBody').innerHTML = `
+      <dl class="detail">
+        <dt>カテゴリー</dt><dd>${escapeHtml(eventCategories(event).join(' / '))}</dd>
+        <dt>種類</dt><dd>${escapeHtml(event.type || '')}</dd>
+        <dt>日付</dt><dd>${escapeHtml(event.date || '')}</dd>
+        <dt>時間</dt><dd>${escapeHtml(time)}</dd>
+        <dt>予定名</dt><dd>${escapeHtml(event.title || '')}</dd>
+        <dt>会場</dt><dd>${escapeHtml(event.location || '')}</dd>
+        <dt>詳細</dt><dd>${escapeHtml(event.note || '')}</dd>
+      </dl>
+    `;
+
+    $('detailModal').classList.add('open');
+    $('detailModal').setAttribute('aria-hidden','false');
+
+  }catch(error){
+    showStatus($('appStatus'),error.message,'error');
+  }
+}
+
+function closeModal(){
+  $('detailModal').classList.remove('open');
+  $('detailModal').setAttribute('aria-hidden','true');
+}
+
+function shiftMonth(offset){
+  const [year,monthNumber] = state.month.split('-').map(Number);
+  loadMonth(monthKey(new Date(year,monthNumber-1+offset,1)))
+    .catch(error=>showStatus($('appStatus'),error.message,'error'));
+}
+
+async function logout(){
+  const token = state.token;
+  clearSession();
+
+  if(token){
+    api('logout',{token},10000).catch(()=>{});
+  }
+
+  try{
+    if(liff.isLoggedIn()) liff.logout();
+  }catch{}
+
+  location.replace(location.origin + location.pathname + '?v=1010');
+}
+
+function bindEvents(){
+  $('retryBtn').onclick = authenticate;
+  $('logoutBtn').onclick = logout;
+  $('prevBtn').onclick = () => shiftMonth(-1);
+  $('nextBtn').onclick = () => shiftMonth(1);
+  $('todayBtn').onclick = () =>
+    loadMonth(monthKey(new Date()))
+      .catch(error=>showStatus($('appStatus'),error.message,'error'));
+
+  $('categoryFilter').onchange = () => {
+    state.category = $('categoryFilter').value;
+    renderCalendar();
+  };
+
+  $('closeModalBtn').onclick = closeModal;
+  $('closeModalBottomBtn').onclick = closeModal;
+  $('detailModal').onclick = event => {
+    if(event.target === $('detailModal')) closeModal();
+  };
+}
+
+async function init(){
+  bindEvents();
+  await initLogin();
+}
+
+init();
+</script>
 </body>
 </html>

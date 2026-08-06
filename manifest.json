@@ -1,17 +1,13 @@
 {
-  "name": "NINJA AIRS 練習予定表",
+  "name": "NINJA AIRS 練習予定表 選手版",
   "short_name": "NINJA予定表",
-  "start_url": "./index.html?v=6",
+  "description": "NINJA AIRS選手用練習予定表",
+  "lang": "ja",
+  "start_url": "./index.html?v=1010",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#07101f",
-  "theme_color": "#0b1220",
-  "icons": [
-    {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
-    }
-  ],
-  "scope": "./"
+  "orientation": "portrait",
+  "background_color": "#07111f",
+  "theme_color": "#07111f",
+  "icons": []
 }
