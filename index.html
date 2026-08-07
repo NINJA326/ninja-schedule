@@ -59,7 +59,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.1-clean</div>
+          <div class="build">build v10.2-liff-endpoint-sync</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -272,7 +272,7 @@ async function authenticate(){
 
     if(!liff.isLoggedIn()){
       liff.login({
-        redirectUri: location.origin + location.pathname + '?v=1010'
+        redirectUri: location.origin + location.pathname + '?v=7'
       });
       return;
     }
@@ -488,7 +488,7 @@ async function logout(){
     if(liff.isLoggedIn()) liff.logout();
   }catch{}
 
-  location.replace(location.origin + location.pathname + '?v=1010');
+  location.replace(location.origin + location.pathname + '?v=7');
 }
 
 function bindEvents(){
