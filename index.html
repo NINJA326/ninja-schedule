@@ -47,9 +47,10 @@
   <section id="bootView" class="screen boot">
     <div class="card">
       <h1>NINJA AIRS</h1>
-      <p id="bootMessage">LINE選手認証を確認しています…</p>
-      <div id="bootStatus" class="status"></div>
-      <button id="retryBtn" class="btn primary hidden" type="button" style="width:100%;margin-top:12px">再試行</button>
+      <p id="bootMessage">選手用予定表</p>
+      <div id="bootStatus" class="status">LINEでログインしてください。</div>
+      <button id="loginBtn" class="btn primary" type="button" style="width:100%;margin-top:12px">LINEでログイン</button>
+      <button id="retryBtn" class="btn hidden" type="button" style="width:100%;margin-top:8px">再試行</button>
     </div>
   </section>
 
@@ -59,7 +60,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.2-liff-endpoint-sync</div>
+          <div class="build">build v10.3-manual-line-login</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -251,51 +252,62 @@ function showBootError(message){
   $('retryBtn').classList.remove('hidden');
 }
 
-async function authenticate(){
+async function initializeLiff(){
+  if(!CONFIG.API_URL){
+    throw new Error('Apps Script URLが設定されていません。');
+  }
+
+  if(!CONFIG.LIFF_ID){
+    throw new Error('LIFF IDが設定されていません。');
+  }
+
+  await liff.init({
+    liffId: CONFIG.LIFF_ID,
+    withLoginOnExternalBrowser: true
+  });
+}
+
+async function completeLineLogin(){
+  const idToken = liff.getIDToken();
+
+  if(!idToken){
+    throw new Error('LINE認証情報を取得できません。');
+  }
+
+  showStatus($('bootStatus'),'選手情報を確認しています…');
+
+  const result = await api('lineLogin',{idToken},45000);
+
+  if(String(result.role || '') !== 'player'){
+    throw new Error('選手アカウントとして認証できませんでした。');
+  }
+
+  saveSession(result);
+  showApp();
+  await loadMonth(monthKey(new Date()));
+}
+
+async function loginWithLine(){
   try{
+    $('loginBtn').classList.add('hidden');
     $('retryBtn').classList.add('hidden');
+    $('bootMessage').textContent = 'LINEログイン';
+    showStatus($('bootStatus'),'LINE認証を開始しています…');
 
-    if(!CONFIG.API_URL){
-      throw new Error('Apps Script URLが設定されていません。');
-    }
-
-    if(!CONFIG.LIFF_ID){
-      throw new Error('LIFF IDが設定されていません。');
-    }
-
-    showStatus($('bootStatus'),'LINEログインを確認しています…');
-
-    await liff.init({
-      liffId: CONFIG.LIFF_ID,
-      withLoginOnExternalBrowser: true
-    });
+    await initializeLiff();
 
     if(!liff.isLoggedIn()){
       liff.login({
-        redirectUri: location.origin + location.pathname + '?v=7'
+        redirectUri: location.origin + location.pathname + '?v=7&login=1'
       });
       return;
     }
 
-    const idToken = liff.getIDToken();
-
-    if(!idToken){
-      throw new Error('LINE認証情報を取得できません。');
-    }
-
-    showStatus($('bootStatus'),'選手情報を確認しています…');
-
-    const result = await api('lineLogin',{idToken},45000);
-
-    if(String(result.role || '') !== 'player'){
-      throw new Error('選手アカウントとして認証できませんでした。');
-    }
-
-    saveSession(result);
-    showApp();
-    await loadMonth(monthKey(new Date()));
+    await completeLineLogin();
 
   }catch(error){
+    $('loginBtn').classList.remove('hidden');
+    $('retryBtn').classList.remove('hidden');
     showBootError(error.message || '認証に失敗しました。');
   }
 }
@@ -303,6 +315,7 @@ async function authenticate(){
 async function initLogin(){
   if(hasValidSession()){
     showApp();
+
     try{
       await loadMonth(monthKey(new Date()));
       return;
@@ -318,7 +331,30 @@ async function initLogin(){
     }
   }
 
-  await authenticate();
+  try{
+    await initializeLiff();
+
+    const params = new URLSearchParams(location.search);
+    const returnedFromLogin =
+      params.get('login') === '1' ||
+      params.has('code') ||
+      params.has('state');
+
+    if(liff.isLoggedIn() && returnedFromLogin){
+      $('loginBtn').classList.add('hidden');
+      showStatus($('bootStatus'),'LINE認証を確認しています…');
+      await completeLineLogin();
+      return;
+    }
+
+    $('bootMessage').textContent = '選手用予定表';
+    showStatus($('bootStatus'),'LINEでログインしてください。');
+    $('loginBtn').classList.remove('hidden');
+
+  }catch(error){
+    showBootError(error.message || '初期化に失敗しました。');
+    $('loginBtn').classList.remove('hidden');
+  }
 }
 
 function monthKey(date){
@@ -485,14 +521,29 @@ async function logout(){
   }
 
   try{
-    if(liff.isLoggedIn()) liff.logout();
+    await initializeLiff();
+    if(liff.isLoggedIn()){
+      liff.logout();
+    }
   }catch{}
 
-  location.replace(location.origin + location.pathname + '?v=7');
+  $('appView').classList.add('hidden');
+  $('bootView').classList.remove('hidden');
+  $('bootMessage').textContent = 'ログアウトしました';
+  showStatus($('bootStatus'),'再度利用する場合は「LINEでログイン」を押してください。','ok');
+  $('loginBtn').classList.remove('hidden');
+  $('retryBtn').classList.add('hidden');
+
+  history.replaceState(
+    null,
+    '',
+    location.origin + location.pathname + '?v=7'
+  );
 }
 
 function bindEvents(){
-  $('retryBtn').onclick = authenticate;
+  $('loginBtn').onclick = loginWithLine;
+  $('retryBtn').onclick = loginWithLine;
   $('logoutBtn').onclick = logout;
   $('prevBtn').onclick = () => shiftMonth(-1);
   $('nextBtn').onclick = () => shiftMonth(1);
