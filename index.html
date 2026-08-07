@@ -49,6 +49,7 @@
       <h1>NINJA AIRS</h1>
       <p id="bootMessage">LINE選手認証を確認しています…</p>
       <div id="bootStatus" class="status"></div>
+      <button id="loginBtn" class="btn primary hidden" type="button" style="width:100%;margin-top:12px">LINEでログイン</button>
       <button id="retryBtn" class="btn primary hidden" type="button" style="width:100%;margin-top:12px">再試行</button>
     </div>
   </section>
@@ -59,7 +60,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.5-refresh-expired-line-token</div>
+          <div class="build">build v10.6-manual-login-after-logout</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -113,7 +114,6 @@ const CONFIG = Object.freeze({
   PLAYER_KEY: 'ninjaSchedulePlayerV101',
   EXPIRES_KEY: 'ninjaScheduleExpiresV101',
   LIFF_KEY: 'ninjaScheduleLiffIdV104',
-  RELOGIN_KEY: 'ninjaScheduleReloginV105',
   MONTH_CACHE_PREFIX: 'ninjaScheduleMonthV101:'
 });
 
@@ -276,38 +276,39 @@ async function resolveLiffId(){
 }
 
 
-function isExpiredLineTokenError(error){
-  const message = String(error?.message || '');
-  return /idToken expired|ID token expired|token expired/i.test(message);
+function isLoggedOutLanding(){
+  const params = new URLSearchParams(location.search);
+  return params.get('loggedOut') === '1';
 }
 
-async function forceFreshLineLogin(){
+function showLoggedOutScreen(){
   clearSession();
-  sessionStorage.setItem(CONFIG.RELOGIN_KEY,'1');
-
-  try{
-    const liffId = await resolveLiffId();
-
-    await liff.init({
-      liffId,
-      withLoginOnExternalBrowser: true
-    });
-
-    if(liff.isLoggedIn()){
-      liff.logout();
-    }
-  }catch(error){}
-
-  location.replace(
-    location.origin +
-    location.pathname +
-    '?mode=player&v=10.5&relogin=1'
+  $('appView').classList.add('hidden');
+  $('bootView').classList.remove('hidden');
+  $('bootMessage').textContent = 'ログアウトしました';
+  showStatus(
+    $('bootStatus'),
+    '再度利用する場合は「LINEでログイン」を押してください。',
+    'ok'
   );
+  $('loginBtn').classList.remove('hidden');
+  $('retryBtn').classList.add('hidden');
+}
+
+async function manualLineLogin(){
+  $('loginBtn').classList.add('hidden');
+  history.replaceState(
+    null,
+    '',
+    location.origin + location.pathname + '?mode=player&v=10.6'
+  );
+  await authenticatePlayer();
 }
 
 async function authenticatePlayer(){
   try{
     $('retryBtn').classList.add('hidden');
+    $('loginBtn').classList.add('hidden');
     $('appView').classList.add('hidden');
     $('bootView').classList.remove('hidden');
     $('bootMessage').textContent = 'LINE選手認証を確認しています…';
@@ -326,13 +327,11 @@ async function authenticatePlayer(){
     });
 
     if(!liff.isLoggedIn()){
-      sessionStorage.removeItem(CONFIG.RELOGIN_KEY);
-
       liff.login({
         redirectUri:
           location.origin +
           location.pathname +
-          '?mode=player&v=10.5'
+          '?mode=player&v=10.6'
       });
       return;
     }
@@ -355,8 +354,6 @@ async function authenticatePlayer(){
       throw new Error('選手アカウントとして認証できませんでした。');
     }
 
-    sessionStorage.removeItem(CONFIG.RELOGIN_KEY);
-
     saveSession(result);
     showApp();
 
@@ -369,38 +366,16 @@ async function authenticatePlayer(){
     });
 
   }catch(error){
-    if(isExpiredLineTokenError(error)){
-      const alreadyRetried =
-        sessionStorage.getItem(CONFIG.RELOGIN_KEY) === '1';
-
-      if(!alreadyRetried){
-        $('bootMessage').textContent = 'LINE認証を更新しています…';
-        showStatus(
-          $('bootStatus'),
-          '認証の有効期限が切れているため、LINEログインを更新します。'
-        );
-
-        await forceFreshLineLogin();
-        return;
-      }
-
-      sessionStorage.removeItem(CONFIG.RELOGIN_KEY);
-      clearSession();
-
-      $('bootMessage').textContent = 'LINEへの再ログインが必要です';
-      showStatus(
-        $('bootStatus'),
-        '認証情報を更新できませんでした。「再試行」を押してください。',
-        'error'
-      );
-      $('retryBtn').classList.remove('hidden');
-      return;
-    }
-
     showBootError(error.message || '認証に失敗しました。');
   }
 }
+
 async function initLogin(){
+  if(isLoggedOutLanding()){
+    showLoggedOutScreen();
+    return;
+  }
+
   if(hasValidSession()){
     showApp();
 
@@ -601,35 +576,13 @@ async function logout(){
   location.replace(
     location.origin +
     location.pathname +
-    '?mode=player&v=10.5'
+    '?mode=player&v=10.6&loggedOut=1'
   );
 }
 
 function bindEvents(){
-  $('retryBtn').onclick = async () => {
-    sessionStorage.removeItem(CONFIG.RELOGIN_KEY);
-    clearSession();
-
-    try{
-      const liffId = await resolveLiffId();
-      await liff.init({
-        liffId,
-        withLoginOnExternalBrowser: true
-      });
-
-      if(liff.isLoggedIn()){
-        liff.logout();
-        location.replace(
-          location.origin +
-          location.pathname +
-          '?mode=player&v=10.5&retry=1'
-        );
-        return;
-      }
-    }catch(error){}
-
-    await authenticatePlayer();
-  };
+  $('loginBtn').onclick = manualLineLogin;
+  $('retryBtn').onclick = authenticatePlayer;
   $('logoutBtn').onclick = logout;
   $('prevBtn').onclick = () => shiftMonth(-1);
   $('nextBtn').onclick = () => shiftMonth(1);
