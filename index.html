@@ -47,10 +47,9 @@
   <section id="bootView" class="screen boot">
     <div class="card">
       <h1>NINJA AIRS</h1>
-      <p id="bootMessage">選手用予定表</p>
-      <div id="bootStatus" class="status">LINEでログインしてください。</div>
-      <button id="loginBtn" class="btn primary" type="button" style="width:100%;margin-top:12px">LINEでログイン</button>
-      <button id="retryBtn" class="btn hidden" type="button" style="width:100%;margin-top:8px">再試行</button>
+      <p id="bootMessage">LINE選手認証を確認しています…</p>
+      <div id="bootStatus" class="status"></div>
+      <button id="retryBtn" class="btn primary hidden" type="button" style="width:100%;margin-top:12px">再試行</button>
     </div>
   </section>
 
@@ -60,7 +59,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.3-manual-line-login</div>
+          <div class="build">build v10.4-v98-auth-restore</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -110,10 +109,10 @@
 const RUNTIME_CONFIG = window.NINJA_SCHEDULE_CONFIG || {};
 const CONFIG = Object.freeze({
   API_URL: String(RUNTIME_CONFIG.API_URL || '').trim(),
-  LIFF_ID: String(RUNTIME_CONFIG.LIFF_ID || '').trim(),
   TOKEN_KEY: 'ninjaScheduleTokenV101',
   PLAYER_KEY: 'ninjaSchedulePlayerV101',
   EXPIRES_KEY: 'ninjaScheduleExpiresV101',
+  LIFF_KEY: 'ninjaScheduleLiffIdV104',
   MONTH_CACHE_PREFIX: 'ninjaScheduleMonthV101:'
 });
 
@@ -121,6 +120,7 @@ const state = {
   token: localStorage.getItem(CONFIG.TOKEN_KEY) || '',
   player: readJson(CONFIG.PLAYER_KEY),
   expiresAt: Number(localStorage.getItem(CONFIG.EXPIRES_KEY) || 0),
+  liffId: localStorage.getItem(CONFIG.LIFF_KEY) || '',
   month: '',
   events: [],
   category: 'ALL'
@@ -252,62 +252,88 @@ function showBootError(message){
   $('retryBtn').classList.remove('hidden');
 }
 
-async function initializeLiff(){
-  if(!CONFIG.API_URL){
-    throw new Error('Apps Script URLが設定されていません。');
+async function resolveLiffId(){
+  if(state.liffId){
+    return state.liffId;
   }
 
-  if(!CONFIG.LIFF_ID){
-    throw new Error('LIFF IDが設定されていません。');
+  showStatus($('bootStatus'),'LINE設定を確認しています…');
+
+  const cfg = await api('publicConfig',{},15000);
+  state.liffId = String(cfg?.liffId || '').trim();
+
+  if(!state.liffId){
+    throw new Error('SCHEDULE_LIFF_IDが設定されていません。');
   }
 
-  await liff.init({
-    liffId: CONFIG.LIFF_ID,
-    withLoginOnExternalBrowser: true
-  });
+  if(/^https?:\/\//i.test(state.liffId)){
+    throw new Error('SCHEDULE_LIFF_IDの設定形式が正しくありません。');
+  }
+
+  localStorage.setItem(CONFIG.LIFF_KEY,state.liffId);
+  return state.liffId;
 }
 
-async function completeLineLogin(){
-  const idToken = liff.getIDToken();
-
-  if(!idToken){
-    throw new Error('LINE認証情報を取得できません。');
-  }
-
-  showStatus($('bootStatus'),'選手情報を確認しています…');
-
-  const result = await api('lineLogin',{idToken},45000);
-
-  if(String(result.role || '') !== 'player'){
-    throw new Error('選手アカウントとして認証できませんでした。');
-  }
-
-  saveSession(result);
-  showApp();
-  await loadMonth(monthKey(new Date()));
-}
-
-async function loginWithLine(){
+async function authenticatePlayer(){
   try{
-    $('loginBtn').classList.add('hidden');
     $('retryBtn').classList.add('hidden');
-    $('bootMessage').textContent = 'LINEログイン';
-    showStatus($('bootStatus'),'LINE認証を開始しています…');
+    $('appView').classList.add('hidden');
+    $('bootView').classList.remove('hidden');
+    $('bootMessage').textContent = 'LINE選手認証を確認しています…';
 
-    await initializeLiff();
+    if(!CONFIG.API_URL){
+      throw new Error('Apps Script URLが設定されていません。');
+    }
+
+    const liffId = await resolveLiffId();
+
+    showStatus($('bootStatus'),'LINEログインを確認しています…');
+
+    await liff.init({
+      liffId,
+      withLoginOnExternalBrowser: true
+    });
 
     if(!liff.isLoggedIn()){
       liff.login({
-        redirectUri: location.origin + location.pathname + '?v=7&login=1'
+        redirectUri:
+          location.origin +
+          location.pathname +
+          '?mode=player&v=10.4'
       });
       return;
     }
 
-    await completeLineLogin();
+    const idToken = liff.getIDToken();
+
+    if(!idToken){
+      throw new Error('LINE認証情報を取得できません。');
+    }
+
+    showStatus($('bootStatus'),'選手情報を確認しています…');
+
+    const result = await api(
+      'lineLogin',
+      {idToken},
+      45000
+    );
+
+    if(String(result.role || '') !== 'player'){
+      throw new Error('選手アカウントとして認証できませんでした。');
+    }
+
+    saveSession(result);
+    showApp();
+
+    loadMonth(monthKey(new Date())).catch(error=>{
+      showStatus(
+        $('appStatus'),
+        error?.message || '予定を読み込めませんでした。',
+        'error'
+      );
+    });
 
   }catch(error){
-    $('loginBtn').classList.remove('hidden');
-    $('retryBtn').classList.remove('hidden');
     showBootError(error.message || '認証に失敗しました。');
   }
 }
@@ -316,45 +342,23 @@ async function initLogin(){
   if(hasValidSession()){
     showApp();
 
-    try{
-      await loadMonth(monthKey(new Date()));
-      return;
-    }catch(error){
-      if(/ログイン|有効期限|認証/.test(error.message || '')){
+    loadMonth(monthKey(new Date())).catch(async error=>{
+      if(/ログイン|有効期限|認証/.test(error?.message || '')){
         clearSession();
-        $('appView').classList.add('hidden');
-        $('bootView').classList.remove('hidden');
+        await authenticatePlayer();
       }else{
-        showStatus($('appStatus'),error.message,'error');
-        return;
+        showStatus(
+          $('appStatus'),
+          error?.message || '予定を読み込めませんでした。',
+          'error'
+        );
       }
-    }
+    });
+
+    return;
   }
 
-  try{
-    await initializeLiff();
-
-    const params = new URLSearchParams(location.search);
-    const returnedFromLogin =
-      params.get('login') === '1' ||
-      params.has('code') ||
-      params.has('state');
-
-    if(liff.isLoggedIn() && returnedFromLogin){
-      $('loginBtn').classList.add('hidden');
-      showStatus($('bootStatus'),'LINE認証を確認しています…');
-      await completeLineLogin();
-      return;
-    }
-
-    $('bootMessage').textContent = '選手用予定表';
-    showStatus($('bootStatus'),'LINEでログインしてください。');
-    $('loginBtn').classList.remove('hidden');
-
-  }catch(error){
-    showBootError(error.message || '初期化に失敗しました。');
-    $('loginBtn').classList.remove('hidden');
-  }
+  await authenticatePlayer();
 }
 
 function monthKey(date){
@@ -521,29 +525,26 @@ async function logout(){
   }
 
   try{
-    await initializeLiff();
+    const liffId = await resolveLiffId();
+    await liff.init({
+      liffId,
+      withLoginOnExternalBrowser: true
+    });
+
     if(liff.isLoggedIn()){
       liff.logout();
     }
-  }catch{}
+  }catch(error){}
 
-  $('appView').classList.add('hidden');
-  $('bootView').classList.remove('hidden');
-  $('bootMessage').textContent = 'ログアウトしました';
-  showStatus($('bootStatus'),'再度利用する場合は「LINEでログイン」を押してください。','ok');
-  $('loginBtn').classList.remove('hidden');
-  $('retryBtn').classList.add('hidden');
-
-  history.replaceState(
-    null,
-    '',
-    location.origin + location.pathname + '?v=7'
+  location.replace(
+    location.origin +
+    location.pathname +
+    '?mode=player&v=10.4'
   );
 }
 
 function bindEvents(){
-  $('loginBtn').onclick = loginWithLine;
-  $('retryBtn').onclick = loginWithLine;
+  $('retryBtn').onclick = authenticatePlayer;
   $('logoutBtn').onclick = logout;
   $('prevBtn').onclick = () => shiftMonth(-1);
   $('nextBtn').onclick = () => shiftMonth(1);
