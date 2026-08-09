@@ -38,6 +38,17 @@
     .dialog-head,.dialog-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:13px 15px;border-bottom:1px solid var(--line)}.dialog-foot{border-top:1px solid var(--line);border-bottom:0}
     .dialog-head h2{margin:0;font-size:18px}.dialog-body{overflow:auto;padding:15px}
     .detail{display:grid;grid-template-columns:92px 1fr;gap:10px;margin:0;font-size:14px}.detail dt{color:var(--muted);font-weight:900}.detail dd{margin:0;white-space:pre-wrap;word-break:break-word}
+    .attendance-box{margin-top:16px;padding:14px;background:#0b1930;border:1px solid var(--line);border-radius:14px}
+    .attendance-box h3{margin:0 0 6px;font-size:15px}
+    .attendance-deadline{margin:0 0 10px;color:var(--muted);font-size:12px}
+    .attendance-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .attendance-btn{min-height:42px;border:1px solid var(--line);border-radius:10px;color:#fff;font-weight:900;cursor:pointer}
+    .attendance-btn.join{background:#15803d;border-color:#15803d}
+    .attendance-btn.absent{background:#b91c1c;border-color:#b91c1c}
+    .attendance-btn.undecided{background:#475569;border-color:#475569}
+    .attendance-btn:disabled{opacity:.55;cursor:wait}
+    .attendance-result{min-height:20px;margin-top:10px;font-size:12px;color:var(--muted)}
+    .attendance-result.ok{color:#bbf7d0}.attendance-result.error{color:#fecaca}
     @media(max-width:760px){.month-title{font-size:18px}.calendar{grid-template-rows:28px repeat(6,minmax(72px,1fr))}.event{font-size:8px}.topbar{border-radius:0}}
   </style>
   <script src="./config.js?v=10.1.0"></script>
@@ -60,7 +71,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.7-default-player-category</div>
+          <div class="build">build v10.8-attendance-answer</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -124,7 +135,9 @@ const state = {
   liffId: localStorage.getItem(CONFIG.LIFF_KEY) || '',
   month: '',
   events: [],
-  category: ''
+  category: '',
+  currentEvent: null,
+  attendanceSaving: false
 };
 
 const $ = id => document.getElementById(id);
@@ -575,6 +588,97 @@ function renderCalendar(){
   });
 }
 
+
+function formatAttendanceDeadline(event){
+  const date = String(event.deadlineDate || '').trim();
+  const time = String(event.deadlineTime || '').trim();
+
+  if(!date && !time) return '回答期限：設定なし';
+
+  const dateText = date
+    ? date.replace(/^(\d{4})-(\d{2})-(\d{2}).*$/, '$1/$2/$3')
+    : '';
+
+  const timeText = time
+    ? time.replace(/^.*?(\d{1,2}):(\d{2}).*$/, '$1:$2')
+    : '';
+
+  return '回答期限：' + [dateText,timeText].filter(Boolean).join(' ');
+}
+
+function attendanceHtml(event){
+  if(!event.attendanceEnabled) return '';
+
+  return `
+    <section class="attendance-box">
+      <h3>出欠回答</h3>
+      <p class="attendance-deadline">${escapeHtml(formatAttendanceDeadline(event))}</p>
+      <div class="attendance-actions">
+        <button class="attendance-btn join" type="button" data-attendance="参加">参加</button>
+        <button class="attendance-btn absent" type="button" data-attendance="欠席">欠席</button>
+        <button class="attendance-btn undecided" type="button" data-attendance="未定">未定</button>
+      </div>
+      <div id="attendanceResult" class="attendance-result"></div>
+    </section>
+  `;
+}
+
+function setAttendanceButtonsDisabled(disabled){
+  document.querySelectorAll('[data-attendance]').forEach(button=>{
+    button.disabled = disabled;
+  });
+}
+
+async function saveAttendance(status){
+  if(state.attendanceSaving || !state.currentEvent) return;
+
+  state.attendanceSaving = true;
+  setAttendanceButtonsDisabled(true);
+
+  const resultNode = $('attendanceResult');
+
+  if(resultNode){
+    resultNode.textContent = '保存しています…';
+    resultNode.className = 'attendance-result';
+  }
+
+  try{
+    const result = await api(
+      'attendance.save',
+      {
+        token: state.token,
+        scheduleId: state.currentEvent.scheduleId,
+        status,
+        reason: '',
+        arrivalTime: ''
+      },
+      30000
+    );
+
+    if(resultNode){
+      resultNode.textContent =
+        `「${result.status || status}」で回答しました。`;
+      resultNode.className = 'attendance-result ok';
+    }
+
+  }catch(error){
+    if(resultNode){
+      resultNode.textContent =
+        error?.message || '出欠回答を保存できませんでした。';
+      resultNode.className = 'attendance-result error';
+    }
+  }finally{
+    state.attendanceSaving = false;
+    setAttendanceButtonsDisabled(false);
+  }
+}
+
+function bindAttendanceButtons(){
+  document.querySelectorAll('[data-attendance]').forEach(button=>{
+    button.onclick = () => saveAttendance(button.dataset.attendance);
+  });
+}
+
 async function openEvent(scheduleId){
   try{
     const payload = await api(
@@ -584,6 +688,8 @@ async function openEvent(scheduleId){
     );
 
     const event = payload.schedule || payload.event || payload.item || payload;
+    state.currentEvent = event;
+
     const time = event.allDay
       ? '終日'
       : [event.startTime,event.endTime].filter(Boolean).join('〜') || '時間未設定';
@@ -595,10 +701,13 @@ async function openEvent(scheduleId){
         <dt>日付</dt><dd>${escapeHtml(event.date || '')}</dd>
         <dt>時間</dt><dd>${escapeHtml(time)}</dd>
         <dt>予定名</dt><dd>${escapeHtml(event.title || '')}</dd>
-        <dt>会場</dt><dd>${escapeHtml(event.location || '')}</dd>
-        <dt>詳細</dt><dd>${escapeHtml(event.note || '')}</dd>
+        <dt>会場</dt><dd>${escapeHtml(event.place || event.location || '')}</dd>
+        <dt>詳細</dt><dd>${escapeHtml(event.detail || event.note || '')}</dd>
       </dl>
+      ${attendanceHtml(event)}
     `;
+
+    bindAttendanceButtons();
 
     $('detailModal').classList.add('open');
     $('detailModal').setAttribute('aria-hidden','false');
@@ -607,8 +716,9 @@ async function openEvent(scheduleId){
     showStatus($('appStatus'),error.message,'error');
   }
 }
-
 function closeModal(){
+  state.currentEvent = null;
+  state.attendanceSaving = false;
   $('detailModal').classList.remove('open');
   $('detailModal').setAttribute('aria-hidden','true');
 }
