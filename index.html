@@ -47,6 +47,8 @@
     .attendance-btn.absent{background:#b91c1c;border-color:#b91c1c}
     .attendance-btn.undecided{background:#475569;border-color:#475569}
     .attendance-btn:disabled{opacity:.55;cursor:wait}
+    .attendance-btn.selected{outline:3px solid #fff;outline-offset:2px}
+    .attendance-current{margin:0 0 10px;font-size:13px;font-weight:900;color:#e2e8f0}
     .attendance-result{min-height:20px;margin-top:10px;font-size:12px;color:var(--muted)}
     .attendance-result.ok{color:#bbf7d0}.attendance-result.error{color:#fecaca}
     @media(max-width:760px){.month-title{font-size:18px}.calendar{grid-template-rows:28px repeat(6,minmax(72px,1fr))}.event{font-size:8px}.topbar{border-radius:0}}
@@ -71,7 +73,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.8-attendance-answer</div>
+          <div class="build">build v10.9-attendance-current</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -612,6 +614,7 @@ function attendanceHtml(event){
   return `
     <section class="attendance-box">
       <h3>出欠回答</h3>
+      <p id="attendanceCurrent" class="attendance-current">現在の回答：確認中…</p>
       <p class="attendance-deadline">${escapeHtml(formatAttendanceDeadline(event))}</p>
       <div class="attendance-actions">
         <button class="attendance-btn join" type="button" data-attendance="参加">参加</button>
@@ -622,11 +625,60 @@ function attendanceHtml(event){
     </section>
   `;
 }
-
 function setAttendanceButtonsDisabled(disabled){
   document.querySelectorAll('[data-attendance]').forEach(button=>{
     button.disabled = disabled;
   });
+}
+
+
+function applyCurrentAttendance(status){
+  const normalized = String(status || '').trim();
+  const currentNode = $('attendanceCurrent');
+
+  if(currentNode){
+    currentNode.textContent =
+      normalized
+        ? `現在の回答：${normalized}`
+        : '現在の回答：未回答';
+  }
+
+  document.querySelectorAll('[data-attendance]').forEach(button=>{
+    button.classList.toggle(
+      'selected',
+      button.dataset.attendance === normalized
+    );
+  });
+}
+
+async function loadCurrentAttendance(){
+  if(!state.currentEvent?.attendanceEnabled) return;
+
+  try{
+    const payload = await api(
+      'attendance.getCurrent',
+      {
+        token: state.token,
+        scheduleId: state.currentEvent.scheduleId
+      },
+      30000
+    );
+
+    const attendance =
+      payload?.attendance || null;
+
+    applyCurrentAttendance(
+      attendance?.status || ''
+    );
+
+  }catch(error){
+    const currentNode = $('attendanceCurrent');
+
+    if(currentNode){
+      currentNode.textContent =
+        '現在の回答を取得できませんでした。';
+    }
+  }
 }
 
 async function saveAttendance(status){
@@ -660,6 +712,10 @@ async function saveAttendance(status){
         `「${result.status || status}」で回答しました。`;
       resultNode.className = 'attendance-result ok';
     }
+
+    applyCurrentAttendance(
+      result.status || status
+    );
 
   }catch(error){
     if(resultNode){
@@ -708,6 +764,7 @@ async function openEvent(scheduleId){
     `;
 
     bindAttendanceButtons();
+    loadCurrentAttendance();
 
     $('detailModal').classList.add('open');
     $('detailModal').setAttribute('aria-hidden','false');
