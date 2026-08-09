@@ -60,7 +60,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.6-manual-login-after-logout</div>
+          <div class="build">build v10.7-default-player-category</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -124,7 +124,7 @@ const state = {
   liffId: localStorage.getItem(CONFIG.LIFF_KEY) || '',
   month: '',
   events: [],
-  category: 'ALL'
+  category: ''
 };
 
 const $ = id => document.getElementById(id);
@@ -241,10 +241,25 @@ function hasValidSession(){
 function showApp(){
   $('bootView').classList.add('hidden');
   $('appView').classList.remove('hidden');
+
+  const playerCategory = String(state.player?.category || '').trim();
+
   $('playerInfo').textContent =
     (state.player?.playerName || state.player?.name || '選手') +
     ' / ' +
-    (state.player?.category || '');
+    playerCategory;
+
+  if(!state.category){
+    state.category = playerCategory || 'ALL';
+  }
+
+  const filter = $('categoryFilter');
+  if([...filter.options].some(option => option.value === state.category)){
+    filter.value = state.category;
+  }else{
+    state.category = 'ALL';
+    filter.value = 'ALL';
+  }
 }
 
 function showBootError(message){
@@ -446,23 +461,74 @@ async function loadMonth(month){
   showStatus($('appStatus'),'予定を読み込んでいます…');
 
   const [year,monthNumber] = month.split('-').map(Number);
-  const payload = await api(
-    'schedule.getByMonth',
-    {token:state.token,year,month:monthNumber},
-    30000
-  );
 
-  state.events = normalizeEventList(payload);
+  if(state.category === 'ALL'){
+    const categories = [
+      '男子U13','男子U14','男子U15',
+      '女子U13','女子U14','女子U15'
+    ];
+
+    const results = await Promise.all(
+      categories.map(category =>
+        api(
+          'schedule.getByMonth',
+          {
+            token:state.token,
+            year,
+            month:monthNumber,
+            category
+          },
+          30000
+        )
+      )
+    );
+
+    const merged = [];
+    const seen = new Set();
+
+    results.forEach(payload=>{
+      normalizeEventList(payload).forEach(event=>{
+        const key = String(event.scheduleId || '') || JSON.stringify(event);
+        if(seen.has(key)) return;
+        seen.add(key);
+        merged.push(event);
+      });
+    });
+
+    state.events = merged;
+  }else{
+    const payload = await api(
+      'schedule.getByMonth',
+      {
+        token:state.token,
+        year,
+        month:monthNumber,
+        category:state.category
+      },
+      30000
+    );
+
+    state.events = normalizeEventList(payload);
+  }
+
   renderCalendar();
-  showStatus($('appStatus'),month.replace('-','年') + '月を読み込みました。','ok');
+
+  const categoryLabel =
+    state.category === 'ALL'
+      ? '全カテゴリー'
+      : state.category;
+
+  showStatus(
+    $('appStatus'),
+    `${month.replace('-','年')}月 / ${categoryLabel} を読み込みました。`,
+    'ok'
+  );
 }
 
 function filteredEvents(date){
-  return state.events.filter(event=>{
-    if(String(event.date || '') !== date) return false;
-    if(state.category === 'ALL') return true;
-    return eventCategories(event).includes(state.category);
-  });
+  return state.events.filter(
+    event => String(event.date || '') === date
+  );
 }
 
 function renderCalendar(){
@@ -592,7 +658,15 @@ function bindEvents(){
 
   $('categoryFilter').onchange = () => {
     state.category = $('categoryFilter').value;
-    renderCalendar();
+
+    loadMonth(state.month || monthKey(new Date()))
+      .catch(error=>{
+        showStatus(
+          $('appStatus'),
+          error?.message || '予定を読み込めませんでした。',
+          'error'
+        );
+      });
   };
 
   $('closeModalBtn').onclick = closeModal;
