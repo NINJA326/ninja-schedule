@@ -73,7 +73,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.9-attendance-current</div>
+          <div class="build">build v10.10-deadline-readable</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -592,22 +592,33 @@ function renderCalendar(){
 
 
 function formatAttendanceDeadline(event){
-  const date = String(event.deadlineDate || '').trim();
-  const time = String(event.deadlineTime || '').trim();
+  const rawDate = String(event.deadlineDate || '').trim();
 
-  if(!date && !time) return '回答期限：設定なし';
+  if(!rawDate){
+    return '回答期限：設定なし';
+  }
 
-  const dateText = date
-    ? date.replace(/^(\d{4})-(\d{2})-(\d{2}).*$/, '$1/$2/$3')
-    : '';
+  let date = '';
 
-  const timeText = time
-    ? time.replace(/^.*?(\d{1,2}):(\d{2}).*$/, '$1:$2')
-    : '';
+  const isoMatch = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
 
-  return '回答期限：' + [dateText,timeText].filter(Boolean).join(' ');
+  if(isoMatch){
+    date = `${isoMatch[1]}.${isoMatch[2]}.${isoMatch[3]}`;
+  }else{
+    const parsed = new Date(rawDate);
+
+    if(!Number.isNaN(parsed.getTime())){
+      const year = parsed.getFullYear();
+      const month = String(parsed.getMonth() + 1).padStart(2,'0');
+      const day = String(parsed.getDate()).padStart(2,'0');
+      date = `${year}.${month}.${day}`;
+    }
+  }
+
+  return date
+    ? `${date}まで`
+    : '回答期限：設定なし';
 }
-
 function attendanceHtml(event){
   if(!event.attendanceEnabled) return '';
 
