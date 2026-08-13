@@ -28,11 +28,18 @@
     .toolbar{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center}
     .nav{display:flex;gap:5px}.month-title{margin:0;text-align:center;font-size:20px}
     select{min-height:40px;max-width:150px;padding:7px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);font-weight:700}
-    .calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:30px repeat(6,minmax(82px,1fr));border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel)}
+    .calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:30px repeat(6,minmax(96px,1fr));border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel)}
     .dow{display:grid;place-items:center;border-right:1px solid var(--line);background:#0a1627;font-size:12px;font-weight:900}.dow:nth-child(7){border-right:0}.sun{color:#fca5a5}.sat{color:#93c5fd}
     .day{min-width:0;padding:3px;border-top:1px solid var(--line);border-right:1px solid var(--line);overflow:hidden}.day:nth-child(7n){border-right:0}.day.out{opacity:.32}.day.today{box-shadow:inset 0 0 0 2px #60a5fa}
     .day-number{display:block;margin-bottom:2px;font-size:11px;font-weight:900}
-    .event{display:block;width:100%;margin:2px 0;padding:3px 4px;border:0;border-radius:5px;color:#fff;text-align:left;font-size:9px;font-weight:800;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .event{display:block;width:100%;margin:2px 0;padding:3px 4px;border:0;border-radius:5px;color:#fff;text-align:left;font-size:9px;font-weight:800;line-height:1.2;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;touch-action:manipulation}
+    .event:active{transform:scale(.98);opacity:.82}
+    .more-events{display:block;width:100%;margin:2px 0;padding:2px 3px;border:1px solid var(--line);border-radius:5px;background:#0b1930;color:#bfdbfe;text-align:center;font-size:9px;font-weight:900;cursor:pointer;touch-action:manipulation}
+    .day-event-list{display:grid;gap:8px}
+    .day-event-item{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;color:#fff;text-align:left;cursor:pointer}
+    .day-event-item:active{transform:scale(.99);opacity:.85}
+    .day-event-meta{display:block;margin-bottom:4px;font-size:11px;font-weight:900;opacity:.92}
+    .day-event-title{display:block;font-size:14px;font-weight:900;white-space:normal;word-break:break-word}
     .modal{position:fixed;inset:0;z-index:50;display:none;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.72)}.modal.open{display:flex}
     .dialog{width:min(680px,100%);max-height:92dvh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:20px 20px 0 0;overflow:hidden}
     .dialog-head,.dialog-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:13px 15px;border-bottom:1px solid var(--line)}.dialog-foot{border-top:1px solid var(--line);border-bottom:0}
@@ -55,7 +62,7 @@
     .attendance-reason-form label{display:block;margin-bottom:6px;font-size:13px;font-weight:900}
     .attendance-reason-form textarea{width:100%;min-height:88px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);resize:vertical}
     .attendance-reason-form .btn{width:100%;margin-top:8px}
-    @media(max-width:760px){.month-title{font-size:18px}.calendar{grid-template-rows:28px repeat(6,minmax(72px,1fr))}.event{font-size:8px}.topbar{border-radius:0}}
+    @media(max-width:760px){.month-title{font-size:18px}.calendar{grid-template-rows:28px repeat(6,minmax(102px,1fr))}.event{font-size:8.5px;padding:3px}.more-events{font-size:8.5px}.topbar{border-radius:0}}
   </style>
   <script src="./config.js?v=10.1.0"></script>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -77,7 +84,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.13-all-category-fast-filter</div>
+          <div class="build">build v10.14-calendar-readable-multi-event</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -573,6 +580,102 @@ function filteredEvents(date){
   );
 }
 
+
+function calendarCategoryLabel(event){
+  const categories = eventCategories(event);
+
+  if(!categories.length) return '';
+
+  if(categories.length > 1){
+    const first = calendarCategoryLabel({
+      categories:[categories[0]]
+    });
+
+    return first
+      ? `${first}+${categories.length-1}`
+      : `${categories.length}カテゴリ`;
+  }
+
+  const category = String(categories[0] || '').trim();
+
+  const match = category.match(/(?:男子|女子)?(U1[345])/i);
+
+  if(match){
+    return match[1].toUpperCase();
+  }
+
+  if(category === '男子全体') return '男子';
+  if(category === '女子全体') return '女子';
+  if(category === '全体') return '全体';
+
+  return category;
+}
+
+function calendarEventLabel(event){
+  const type = String(event.type || '予定').trim();
+  const category = calendarCategoryLabel(event);
+  const title = String(
+    event.title ||
+    event.detail ||
+    event.note ||
+    '予定'
+  ).trim();
+
+  return [
+    type,
+    category,
+    title
+  ]
+    .filter(Boolean)
+    .join('/');
+}
+
+function openDayEventList(date){
+  const events = filteredEvents(date);
+
+  if(!events.length) return;
+
+  state.currentEvent = null;
+  state.currentAttendance = null;
+
+  $('detailBody').innerHTML = `
+    <div class="day-event-list">
+      ${events.map(event=>`
+        <button
+          class="day-event-item"
+          type="button"
+          data-day-event-id="${escapeHtml(event.scheduleId || '')}"
+          style="background:${colorFor(event)}"
+        >
+          <span class="day-event-meta">
+            ${escapeHtml(
+              [
+                event.type || '予定',
+                calendarCategoryLabel(event),
+                event.allDay
+                  ? '終日'
+                  : (event.startTime || '')
+              ].filter(Boolean).join(' / ')
+            )}
+          </span>
+          <span class="day-event-title">
+            ${escapeHtml(event.title || event.detail || event.note || '予定')}
+          </span>
+        </button>
+      `).join('')}
+    </div>
+  `;
+
+  $('detailModal').classList.add('open');
+  $('detailModal').setAttribute('aria-hidden','false');
+
+  document.querySelectorAll('[data-day-event-id]').forEach(button=>{
+    button.onclick = () => {
+      openEvent(button.dataset.dayEventId);
+    };
+  });
+}
+
 function renderCalendar(){
   const [year,monthNumber] = state.month.split('-').map(Number);
   if(!year || !monthNumber) return;
@@ -595,17 +698,38 @@ function renderCalendar(){
     const key = dateKey(date);
     const events = filteredEvents(key);
     const outside = date.getMonth() !== monthNumber-1;
+    const visibleEvents = events.slice(0,3);
+    const hiddenCount = Math.max(0,events.length-visibleEvents.length);
 
     html += `
       <div class="day ${outside?'out':''} ${key===today?'today':''}">
         <span class="day-number">${date.getDate()}</span>
-        ${events.slice(0,4).map(event=>`
-          <button class="event" type="button"
+
+        ${visibleEvents.map(event=>`
+          <button
+            class="event"
+            type="button"
             data-id="${escapeHtml(event.scheduleId || '')}"
-            style="background:${colorFor(event)}">
-            ${escapeHtml((event.title || event.type || '予定') + ' ' + (event.startTime || ''))}
+            style="background:${colorFor(event)}"
+            title="${escapeHtml(calendarEventLabel(event))}"
+          >
+            ${escapeHtml(calendarEventLabel(event))}
           </button>
         `).join('')}
+
+        ${
+          hiddenCount > 0
+            ? `
+              <button
+                class="more-events"
+                type="button"
+                data-more-date="${escapeHtml(key)}"
+              >
+                +${hiddenCount}件
+              </button>
+            `
+            : ''
+        }
       </div>
     `;
   }
@@ -615,8 +739,11 @@ function renderCalendar(){
   $('calendar').querySelectorAll('[data-id]').forEach(button=>{
     button.onclick = () => openEvent(button.dataset.id);
   });
-}
 
+  $('calendar').querySelectorAll('[data-more-date]').forEach(button=>{
+    button.onclick = () => openDayEventList(button.dataset.moreDate);
+  });
+}
 
 function formatAttendanceDeadline(event){
   const rawDate = String(event.deadlineDate || '').trim();
