@@ -51,6 +51,10 @@
     .attendance-current{margin:0 0 10px;font-size:13px;font-weight:900;color:#e2e8f0}
     .attendance-result{min-height:20px;margin-top:10px;font-size:12px;color:var(--muted)}
     .attendance-result.ok{color:#bbf7d0}.attendance-result.error{color:#fecaca}
+    .attendance-reason-form{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#0a1627}
+    .attendance-reason-form label{display:block;margin-bottom:6px;font-size:13px;font-weight:900}
+    .attendance-reason-form textarea{width:100%;min-height:88px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);resize:vertical}
+    .attendance-reason-form .btn{width:100%;margin-top:8px}
     @media(max-width:760px){.month-title{font-size:18px}.calendar{grid-template-rows:28px repeat(6,minmax(72px,1fr))}.event{font-size:8px}.topbar{border-radius:0}}
   </style>
   <script src="./config.js?v=10.1.0"></script>
@@ -73,7 +77,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.10-deadline-readable</div>
+          <div class="build">build v10.11-absence-reason-required</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -139,6 +143,7 @@ const state = {
   events: [],
   category: '',
   currentEvent: null,
+  currentAttendance: null,
   attendanceSaving: false
 };
 
@@ -632,6 +637,11 @@ function attendanceHtml(event){
         <button class="attendance-btn absent" type="button" data-attendance="欠席">欠席</button>
         <button class="attendance-btn undecided" type="button" data-attendance="未定">未定</button>
       </div>
+      <div id="attendanceReasonForm" class="attendance-reason-form hidden">
+        <label for="attendanceReason">欠席理由 *</label>
+        <textarea id="attendanceReason" maxlength="500" placeholder="欠席理由を入力してください"></textarea>
+        <button id="saveAbsentBtn" class="btn danger" type="button">欠席で回答する</button>
+      </div>
       <div id="attendanceResult" class="attendance-result"></div>
     </section>
   `;
@@ -678,6 +688,8 @@ async function loadCurrentAttendance(){
     const attendance =
       payload?.attendance || null;
 
+    state.currentAttendance = attendance;
+
     applyCurrentAttendance(
       attendance?.status || ''
     );
@@ -692,11 +704,34 @@ async function loadCurrentAttendance(){
   }
 }
 
-async function saveAttendance(status){
+async function saveAttendance(status,reason=''){
   if(state.attendanceSaving || !state.currentEvent) return;
+
+  const normalizedStatus = String(status || '').trim();
+  const normalizedReason = String(reason || '').trim();
+
+  if(
+    normalizedStatus === '欠席' &&
+    !normalizedReason
+  ){
+    const resultNode = $('attendanceResult');
+
+    if(resultNode){
+      resultNode.textContent = '欠席理由を入力してください。';
+      resultNode.className = 'attendance-result error';
+    }
+
+    $('attendanceReason')?.focus();
+    return;
+  }
 
   state.attendanceSaving = true;
   setAttendanceButtonsDisabled(true);
+
+  const absentSaveButton = $('saveAbsentBtn');
+  if(absentSaveButton){
+    absentSaveButton.disabled = true;
+  }
 
   const resultNode = $('attendanceResult');
 
@@ -711,22 +746,38 @@ async function saveAttendance(status){
       {
         token: state.token,
         scheduleId: state.currentEvent.scheduleId,
-        status,
-        reason: '',
+        status: normalizedStatus,
+        reason: normalizedStatus === '欠席'
+          ? normalizedReason
+          : '',
         arrivalTime: ''
       },
       30000
     );
 
+    state.currentAttendance = Object.assign(
+      {},
+      state.currentAttendance || {},
+      result || {},
+      {
+        status: result.status || normalizedStatus,
+        reason: normalizedStatus === '欠席'
+          ? normalizedReason
+          : ''
+      }
+    );
+
     if(resultNode){
       resultNode.textContent =
-        `「${result.status || status}」で回答しました。`;
+        `「${result.status || normalizedStatus}」で回答しました。`;
       resultNode.className = 'attendance-result ok';
     }
 
     applyCurrentAttendance(
-      result.status || status
+      result.status || normalizedStatus
     );
+
+    hideAttendanceReasonForm();
 
   }catch(error){
     if(resultNode){
@@ -737,15 +788,77 @@ async function saveAttendance(status){
   }finally{
     state.attendanceSaving = false;
     setAttendanceButtonsDisabled(false);
+
+    if(absentSaveButton){
+      absentSaveButton.disabled = false;
+    }
+  }
+}
+
+function showAttendanceReasonForm(){
+  const form = $('attendanceReasonForm');
+  const reason = $('attendanceReason');
+
+  if(!form || !reason) return;
+
+  form.classList.remove('hidden');
+
+  if(
+    String(state.currentAttendance?.status || '').trim() === '欠席'
+  ){
+    reason.value =
+      String(state.currentAttendance?.reason || '');
+  }else{
+    reason.value = '';
+  }
+
+  const resultNode = $('attendanceResult');
+  if(resultNode){
+    resultNode.textContent = '欠席理由を入力して「欠席で回答する」を押してください。';
+    resultNode.className = 'attendance-result';
+  }
+
+  setTimeout(() => reason.focus(), 0);
+}
+
+function hideAttendanceReasonForm(){
+  const form = $('attendanceReasonForm');
+  if(form){
+    form.classList.add('hidden');
   }
 }
 
 function bindAttendanceButtons(){
   document.querySelectorAll('[data-attendance]').forEach(button=>{
-    button.onclick = () => saveAttendance(button.dataset.attendance);
-  });
-}
+    button.onclick = () => {
+      const status = button.dataset.attendance;
 
+      if(status === '欠席'){
+        showAttendanceReasonForm();
+        return;
+      }
+
+      hideAttendanceReasonForm();
+      saveAttendance(status);
+    };
+  });
+
+  const saveAbsentButton = $('saveAbsentBtn');
+
+  if(saveAbsentButton){
+    saveAbsentButton.onclick = () => {
+      const reason =
+        String(
+          $('attendanceReason')?.value || ''
+        ).trim();
+
+      saveAttendance(
+        '欠席',
+        reason
+      );
+    };
+  }
+}
 async function openEvent(scheduleId){
   try{
     const payload = await api(
@@ -756,6 +869,7 @@ async function openEvent(scheduleId){
 
     const event = payload.schedule || payload.event || payload.item || payload;
     state.currentEvent = event;
+    state.currentAttendance = null;
 
     const time = event.allDay
       ? '終日'
@@ -786,6 +900,7 @@ async function openEvent(scheduleId){
 }
 function closeModal(){
   state.currentEvent = null;
+  state.currentAttendance = null;
   state.attendanceSaving = false;
   $('detailModal').classList.remove('open');
   $('detailModal').setAttribute('aria-hidden','true');
