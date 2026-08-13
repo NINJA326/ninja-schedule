@@ -1401,12 +1401,103 @@ function bindAttendanceButtons(){
   }
 }
 
+
+function formatScheduleTime(value){
+  const text = String(value ?? '').trim();
+
+  if(!text){
+    return '';
+  }
+
+  // 19:00 / 19:00:00 のような通常の時刻文字列
+  const direct =
+    text.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+
+  if(direct){
+    return (
+      String(Number(direct[1])).padStart(2,'0') +
+      ':' +
+      direct[2]
+    );
+  }
+
+  /*
+   * Googleスプレッドシートの「時刻」セルがDateとして返る場合、
+   * 1899-12-30 を基準日とする日時文字列になります。
+   * 日付部分は捨てて、日本時間の HH:mm だけ表示します。
+   */
+  const date =
+    new Date(text);
+
+  if(Number.isNaN(date.getTime())){
+    return text;
+  }
+
+  const parts =
+    new Intl.DateTimeFormat(
+      'ja-JP',
+      {
+        timeZone:'Asia/Tokyo',
+        hour:'2-digit',
+        minute:'2-digit',
+        hour12:false
+      }
+    ).formatToParts(date);
+
+  const hour =
+    parts.find(
+      part => part.type === 'hour'
+    )?.value || '';
+
+  const minute =
+    parts.find(
+      part => part.type === 'minute'
+    )?.value || '';
+
+  return (
+    hour && minute
+      ? `${hour}:${minute}`
+      : text
+  );
+}
+
+function formatScheduleTimeRange(event){
+  if(event?.allDay){
+    return '終日';
+  }
+
+  const start =
+    formatScheduleTime(
+      event?.startTime
+    );
+
+  const end =
+    formatScheduleTime(
+      event?.endTime
+    );
+
+  if(start && end){
+    return `${start} - ${end}`;
+  }
+
+  if(start){
+    return start;
+  }
+
+  if(end){
+    return end;
+  }
+
+  return '時間未設定';
+}
+
 function renderEventDetail(event){
   if(!event) return;
 
-  const time = event.allDay
-    ? '終日'
-    : [event.startTime,event.endTime].filter(Boolean).join('〜') || '時間未設定';
+  const time =
+    formatScheduleTimeRange(
+      event
+    );
 
   $('detailBody').innerHTML = `
     <dl class="detail">
