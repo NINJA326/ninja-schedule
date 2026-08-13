@@ -23,7 +23,7 @@
     .btn{min-height:40px;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);font-weight:800;cursor:pointer}
     .btn.primary{background:var(--primary);border-color:var(--primary)}.btn.danger{background:var(--danger);border-color:var(--danger)}
     .app{width:min(1180px,100%);height:100%;margin:auto;display:flex;flex-direction:column;gap:4px;min-height:0}
-    .toolbar{display:grid;grid-template-columns:32px 44px minmax(86px,1fr) minmax(96px,124px) 32px 46px;gap:4px;align-items:center;flex:0 0 auto}
+    .toolbar{display:grid;grid-template-columns:32px 44px 32px minmax(86px,1fr) minmax(96px,124px) 46px;gap:4px;align-items:center;flex:0 0 auto}
     .month-title{margin:0;text-align:center;font-size:16px;white-space:nowrap}
     select{min-height:34px;min-width:0;max-width:none;padding:5px 6px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--text);font-size:12px;font-weight:700}
     .toolbar .btn{min-height:34px;padding:5px 7px;border-radius:8px;font-size:12px}
@@ -67,7 +67,7 @@
       html,body{height:100%;overflow:hidden}
       .screen{height:100dvh;min-height:0;padding:calc(3px + env(safe-area-inset-top)) 4px calc(3px + env(safe-area-inset-bottom));overflow:hidden}
       .app{height:100%;min-height:0}
-      .toolbar{grid-template-columns:30px 42px minmax(82px,1fr) minmax(92px,112px) 30px 44px;gap:3px}
+      .toolbar{grid-template-columns:30px 42px 30px minmax(78px,1fr) minmax(88px,108px) 44px;gap:3px}
       .month-title{font-size:14px}
       .toolbar .btn{min-height:31px;padding:4px 5px;font-size:11px}
       select{min-height:31px;padding:4px;font-size:11px}
@@ -95,6 +95,7 @@
       <section class="toolbar">
         <button id="prevBtn" class="btn" type="button" aria-label="前の月">‹</button>
         <button id="todayBtn" class="btn" type="button">今日</button>
+        <button id="nextBtn" class="btn" type="button" aria-label="次の月">›</button>
         <h2 id="monthTitle" class="month-title">--</h2>
         <select id="categoryFilter" aria-label="カテゴリー">
           <option value="ALL">全カテゴリー</option>
@@ -105,7 +106,6 @@
           <option value="女子U14">女子U14</option>
           <option value="女子U15">女子U15</option>
         </select>
-        <button id="nextBtn" class="btn" type="button" aria-label="次の月">›</button>
         <button id="logoutBtn" class="btn logout-compact" type="button">退出</button>
       </section>
 
@@ -158,7 +158,9 @@ const state = {
   category: 'ALL',
   currentEvent: null,
   currentAttendance: null,
-  attendanceSaving: false
+  attendanceSaving: false,
+  swipeStartX: 0,
+  swipeStartY: 0
 };
 
 const $ = id => document.getElementById(id);
@@ -1314,6 +1316,72 @@ async function logout(){
   );
 }
 
+
+function bindCalendarSwipe(){
+  const calendar = $('calendar');
+  if(!calendar) return;
+
+  calendar.addEventListener(
+    'touchstart',
+    event=>{
+      if(event.touches.length !== 1) return;
+
+      state.swipeStartX =
+        event.touches[0].clientX;
+
+      state.swipeStartY =
+        event.touches[0].clientY;
+    },
+    {
+      passive:true
+    }
+  );
+
+  calendar.addEventListener(
+    'touchend',
+    event=>{
+      if(!event.changedTouches.length) return;
+
+      const endX =
+        event.changedTouches[0].clientX;
+
+      const endY =
+        event.changedTouches[0].clientY;
+
+      const deltaX =
+        endX - state.swipeStartX;
+
+      const deltaY =
+        endY - state.swipeStartY;
+
+      state.swipeStartX = 0;
+      state.swipeStartY = 0;
+
+      /*
+       * 横移動が十分大きく、
+       * 縦移動より明確に大きい場合だけ月移動します。
+       * 予定タップや縦操作の誤判定を防ぎます。
+       */
+      if(
+        Math.abs(deltaX) < 55 ||
+        Math.abs(deltaX) <=
+          Math.abs(deltaY) * 1.25
+      ){
+        return;
+      }
+
+      if(deltaX < 0){
+        shiftMonth(1);
+      }else{
+        shiftMonth(-1);
+      }
+    },
+    {
+      passive:true
+    }
+  );
+}
+
 function bindEvents(){
   $('loginBtn').onclick = manualLineLogin;
   $('retryBtn').onclick = authenticatePlayer;
@@ -1351,6 +1419,7 @@ function bindEvents(){
 
 async function init(){
   bindEvents();
+  bindCalendarSwipe();
   await initLogin();
 }
 
