@@ -141,6 +141,89 @@ const CONFIG = Object.freeze({
   MONTH_CACHE_PREFIX: 'ninjaScheduleMonthV101:'
 });
 
+const MONTH_CACHE_CONFIG = Object.freeze({
+  MAX_AGE_MS: 6 * 60 * 60 * 1000
+});
+
+function persistentMonthCacheKey(month){
+  return CONFIG.MONTH_CACHE_PREFIX + month;
+}
+
+function savePersistentMonthCache(month,events){
+  try{
+    localStorage.setItem(
+      persistentMonthCacheKey(month),
+      JSON.stringify({
+        month,
+        savedAt: Date.now(),
+        events: Array.isArray(events) ? events : []
+      })
+    );
+  }catch(error){}
+}
+
+function loadPersistentMonthCache(month){
+  try{
+    const raw =
+      localStorage.getItem(
+        persistentMonthCacheKey(month)
+      );
+
+    if(!raw) return null;
+
+    const parsed = JSON.parse(raw);
+
+    if(
+      !parsed ||
+      !Array.isArray(parsed.events) ||
+      !Number(parsed.savedAt)
+    ){
+      localStorage.removeItem(
+        persistentMonthCacheKey(month)
+      );
+      return null;
+    }
+
+    if(
+      Date.now() - Number(parsed.savedAt) >
+      MONTH_CACHE_CONFIG.MAX_AGE_MS
+    ){
+      localStorage.removeItem(
+        persistentMonthCacheKey(month)
+      );
+      return null;
+    }
+
+    return {
+      events: parsed.events,
+      savedAt: Number(parsed.savedAt)
+    };
+
+  }catch(error){
+    localStorage.removeItem(
+      persistentMonthCacheKey(month)
+    );
+    return null;
+  }
+}
+
+function clearPersistentMonthCache(){
+  try{
+    Object.keys(localStorage)
+      .filter(
+        key =>
+          key.startsWith(
+            CONFIG.MONTH_CACHE_PREFIX
+          )
+      )
+      .forEach(
+        key =>
+          localStorage.removeItem(key)
+      );
+  }catch(error){}
+}
+
+
 const AUTH_RECOVERY = Object.freeze({
   FLAG_KEY: 'ninjaScheduleLineAuthRecoveryV101',
   MAX_AGE_MS: 2 * 60 * 1000
@@ -265,6 +348,7 @@ function clearSession(){
   state.allEvents = [];
   state.loadedAllMonth = '';
   state.monthEventCache.clear();
+  clearPersistentMonthCache();
   localStorage.removeItem(CONFIG.TOKEN_KEY);
   localStorage.removeItem(CONFIG.PLAYER_KEY);
   localStorage.removeItem(CONFIG.EXPIRES_KEY);
@@ -712,9 +796,32 @@ async function fetchAllCategoriesMonth(month){
     month,
     merged.slice()
   );
+
+  savePersistentMonthCache(
+    month,
+    merged.slice()
+  );
 }
 async function loadMonth(month){
   state.month = month;
+
+  /*
+   * 1. メモリキャッシュがあれば即表示
+   * 2. 無ければlocalStorageから即復元
+   * 3. 表示後にバックグラウンドで最新版を取得
+   */
+
+  if(!state.monthEventCache.has(month)){
+    const persisted =
+      loadPersistentMonthCache(month);
+
+    if(persisted){
+      state.monthEventCache.set(
+        month,
+        persisted.events.slice()
+      );
+    }
+  }
 
   if(state.monthEventCache.has(month)){
     state.allEvents =
@@ -727,41 +834,92 @@ async function loadMonth(month){
     applyCategoryFilter();
     renderCalendar();
 
-    const categoryLabel =
-      state.category === 'ALL'
-        ? '全カテゴリー'
-        : state.category;
-
-    showStatus(
-      $('appStatus'),
-      `${month.replace('-','年')}月 / ${categoryLabel} を表示しています。`,
-      'ok'
-    );
+    /*
+     * 読み込み中表示は出さず、
+     * 裏で最新版へ静かに更新します。
+     */
+    setTimeout(()=>{
+      refreshMonthInBackground(month)
+        .catch(()=>{});
+    },0);
 
     return;
   }
 
+  /*
+   * 初回端末・初回月だけはデータが無いため通信が必要です。
+   * ただし「読み込み中…」は表示しません。
+   */
   renderCalendar();
-  showStatus(
-    $('appStatus'),
-    '予定を読み込んでいます…'
-  );
 
   await fetchAllCategoriesMonth(month);
 
   applyCategoryFilter();
   renderCalendar();
+}
 
-  const categoryLabel =
-    state.category === 'ALL'
-      ? '全カテゴリー'
-      : state.category;
+async function refreshMonthInBackground(month){
+  const [year,monthNumber] =
+    month.split('-').map(Number);
 
-  showStatus(
-    $('appStatus'),
-    `${month.replace('-','年')}月 / ${categoryLabel} を読み込みました。`,
-    'ok'
+  const categories = [
+    '男子U13','男子U14','男子U15',
+    '女子U13','女子U14','女子U15'
+  ];
+
+  const results = await Promise.all(
+    categories.map(category =>
+      api(
+        'schedule.getByMonth',
+        {
+          token:state.token,
+          year,
+          month:monthNumber,
+          category
+        },
+        30000
+      )
+    )
   );
+
+  const merged = [];
+  const seen = new Set();
+
+  results.forEach(payload=>{
+    normalizeEventList(payload)
+      .forEach(event=>{
+        const key =
+          String(
+            event.scheduleId || ''
+          ) ||
+          JSON.stringify(event);
+
+        if(seen.has(key)) return;
+
+        seen.add(key);
+        merged.push(event);
+      });
+  });
+
+  state.monthEventCache.set(
+    month,
+    merged.slice()
+  );
+
+  savePersistentMonthCache(
+    month,
+    merged.slice()
+  );
+
+  if(state.month === month){
+    state.allEvents =
+      merged.slice();
+
+    state.loadedAllMonth = month;
+
+    applyCategoryFilter();
+    renderCalendar();
+  }
 }
 function filteredEvents(date){
   return state.events.filter(
