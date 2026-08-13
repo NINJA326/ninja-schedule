@@ -154,6 +154,7 @@ const state = {
   month: '',
   events: [],
   allEvents: [],
+  monthEventCache: new Map(),
   loadedAllMonth: '',
   category: 'ALL',
   currentEvent: null,
@@ -260,6 +261,10 @@ function clearSession(){
   state.token = '';
   state.player = null;
   state.expiresAt = 0;
+  state.events = [];
+  state.allEvents = [];
+  state.loadedAllMonth = '';
+  state.monthEventCache.clear();
   localStorage.removeItem(CONFIG.TOKEN_KEY);
   localStorage.removeItem(CONFIG.PLAYER_KEY);
   localStorage.removeItem(CONFIG.EXPIRES_KEY);
@@ -646,6 +651,20 @@ function applyCategoryFilter(){
 }
 
 async function fetchAllCategoriesMonth(month){
+  if(state.monthEventCache.has(month)){
+    const cached =
+      state.monthEventCache.get(month);
+
+    state.allEvents =
+      Array.isArray(cached)
+        ? cached.slice()
+        : [];
+
+    state.loadedAllMonth = month;
+
+    return;
+  }
+
   const [year,monthNumber] = month.split('-').map(Number);
 
   const categories = [
@@ -673,7 +692,11 @@ async function fetchAllCategoriesMonth(month){
 
   results.forEach(payload=>{
     normalizeEventList(payload).forEach(event=>{
-      const key = String(event.scheduleId || '') || JSON.stringify(event);
+      const key =
+        String(
+          event.scheduleId || ''
+        ) ||
+        JSON.stringify(event);
 
       if(seen.has(key)) return;
 
@@ -684,16 +707,23 @@ async function fetchAllCategoriesMonth(month){
 
   state.allEvents = merged;
   state.loadedAllMonth = month;
-}
 
+  state.monthEventCache.set(
+    month,
+    merged.slice()
+  );
+}
 async function loadMonth(month){
   state.month = month;
 
-  if(
-    state.loadedAllMonth === month &&
-    Array.isArray(state.allEvents) &&
-    state.allEvents.length >= 0
-  ){
+  if(state.monthEventCache.has(month)){
+    state.allEvents =
+      state.monthEventCache
+        .get(month)
+        .slice();
+
+    state.loadedAllMonth = month;
+
     applyCategoryFilter();
     renderCalendar();
 
@@ -712,7 +742,10 @@ async function loadMonth(month){
   }
 
   renderCalendar();
-  showStatus($('appStatus'),'予定を読み込んでいます…');
+  showStatus(
+    $('appStatus'),
+    '予定を読み込んでいます…'
+  );
 
   await fetchAllCategoriesMonth(month);
 
