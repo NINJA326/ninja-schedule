@@ -84,7 +84,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.14-calendar-readable-multi-event</div>
+          <div class="build">build v10.15-title-only-calendar</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -713,7 +713,7 @@ function renderCalendar(){
             style="background:${colorFor(event)}"
             title="${escapeHtml(calendarEventLabel(event))}"
           >
-            ${escapeHtml(calendarEventLabel(event))}
+            ${escapeHtml(event.title || '予定')}
           </button>
         `).join('')}
 
