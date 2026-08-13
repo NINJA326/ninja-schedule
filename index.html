@@ -84,7 +84,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.15-title-only-calendar</div>
+          <div class="build">build v10.17-line-auth-recovery</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -139,6 +139,11 @@ const CONFIG = Object.freeze({
   EXPIRES_KEY: 'ninjaScheduleExpiresV101',
   LIFF_KEY: 'ninjaScheduleLiffIdV104',
   MONTH_CACHE_PREFIX: 'ninjaScheduleMonthV101:'
+});
+
+const AUTH_RECOVERY = Object.freeze({
+  FLAG_KEY: 'ninjaScheduleLineAuthRecoveryV101',
+  MAX_AGE_MS: 2 * 60 * 1000
 });
 
 const state = {
@@ -332,13 +337,107 @@ function showLoggedOutScreen(){
   $('retryBtn').classList.add('hidden');
 }
 
+
+function buildPlayerRedirectUri(){
+  return (
+    location.origin +
+    location.pathname +
+    '?mode=player&v=10.17'
+  );
+}
+
+function isExpiredLineIdTokenError(error){
+  const message =
+    String(
+      error?.message || error || ''
+    ).toUpperCase();
+
+  return (
+    message.includes('ID_TOKEN_EXPIRED') ||
+    (
+      message.includes('HTTP 400') &&
+      message.includes('ID TOKEN')
+    ) ||
+    message.includes('TOKEN EXPIRED')
+  );
+}
+
+function canRecoverLineAuth(){
+  const last =
+    Number(
+      sessionStorage.getItem(
+        AUTH_RECOVERY.FLAG_KEY
+      ) || 0
+    );
+
+  return (
+    !last ||
+    Date.now() - last >
+      AUTH_RECOVERY.MAX_AGE_MS
+  );
+}
+
+function markLineAuthRecovery(){
+  sessionStorage.setItem(
+    AUTH_RECOVERY.FLAG_KEY,
+    String(Date.now())
+  );
+}
+
+function clearLineAuthRecovery(){
+  sessionStorage.removeItem(
+    AUTH_RECOVERY.FLAG_KEY
+  );
+}
+
+async function forceFreshLineLogin(){
+  if(!canRecoverLineAuth()){
+    throw new Error(
+      'LINE認証情報を更新できませんでした。LINE画面を一度閉じて、もう一度予定表を開いてください。'
+    );
+  }
+
+  markLineAuthRecovery();
+  clearSession();
+
+  try{
+    if(liff.isLoggedIn()){
+      liff.logout();
+    }
+  }catch(error){}
+
+  const params =
+    new URLSearchParams(
+      location.search
+    );
+
+  const liffState =
+    params.get('liff.state');
+
+  const redirectUri =
+    liffState
+      ? new URL(
+          '.' + liffState,
+          location.href
+        ).toString()
+      : buildPlayerRedirectUri();
+
+  liff.login({
+    redirectUri
+  });
+}
+
 async function manualLineLogin(){
   $('loginBtn').classList.add('hidden');
+
   history.replaceState(
     null,
     '',
-    location.origin + location.pathname + '?mode=player&v=10.6'
+    buildPlayerRedirectUri()
   );
+
+  clearLineAuthRecovery();
+
   await authenticatePlayer();
 }
 
@@ -351,62 +450,124 @@ async function authenticatePlayer(){
     $('bootMessage').textContent = 'LINE選手認証を確認しています…';
 
     if(!CONFIG.API_URL){
-      throw new Error('Apps Script URLが設定されていません。');
+      throw new Error(
+        'Apps Script URLが設定されていません。'
+      );
     }
 
-    const liffId = await resolveLiffId();
+    const liffId =
+      await resolveLiffId();
 
-    showStatus($('bootStatus'),'LINEログインを確認しています…');
+    showStatus(
+      $('bootStatus'),
+      'LINEログインを確認しています…'
+    );
 
+    /*
+     * LINE公式仕様どおり、ページを開くたびにLIFFを初期化します。
+     * liff.init() 完了時に現在のIDトークンが取得されます。
+     */
     await liff.init({
       liffId,
       withLoginOnExternalBrowser: true
     });
 
     if(!liff.isLoggedIn()){
+      clearLineAuthRecovery();
+
       liff.login({
         redirectUri:
-          location.origin +
-          location.pathname +
-          '?mode=player&v=10.6'
+          buildPlayerRedirectUri()
       });
+
       return;
     }
 
-    const idToken = liff.getIDToken();
+    const idToken =
+      liff.getIDToken();
 
     if(!idToken){
-      throw new Error('LINE認証情報を取得できません。');
+      throw new Error(
+        'LINE認証情報を取得できません。'
+      );
     }
 
-    showStatus($('bootStatus'),'選手情報を確認しています…');
-
-    const result = await api(
-      'lineLogin',
-      {idToken},
-      45000
+    showStatus(
+      $('bootStatus'),
+      '選手情報を確認しています…'
     );
 
-    if(String(result.role || '') !== 'player'){
-      throw new Error('選手アカウントとして認証できませんでした。');
+    let result;
+
+    try{
+      result = await api(
+        'lineLogin',
+        {
+          idToken
+        },
+        45000
+      );
+    }catch(error){
+      /*
+       * ID_TOKEN_EXPIRED / HTTP 400 を検出した場合のみ、
+       * 1回だけLINEログアウト→再ログインして
+       * 新しいIDトークンを取得します。
+       */
+      if(
+        isExpiredLineIdTokenError(
+          error
+        )
+      ){
+        showStatus(
+          $('bootStatus'),
+          'LINE認証情報を更新しています…'
+        );
+
+        await forceFreshLineLogin();
+        return;
+      }
+
+      throw error;
     }
 
-    saveSession(result);
+    if(
+      String(
+        result.role || ''
+      ) !== 'player'
+    ){
+      throw new Error(
+        '選手アカウントとして認証できませんでした。'
+      );
+    }
+
+    clearLineAuthRecovery();
+
+    saveSession(
+      result
+    );
+
     showApp();
 
-    loadMonth(monthKey(new Date())).catch(error=>{
+    loadMonth(
+      monthKey(
+        new Date()
+      )
+    ).catch(error=>{
       showStatus(
         $('appStatus'),
-        error?.message || '予定を読み込めませんでした。',
+        error?.message ||
+          '予定を読み込めませんでした。',
         'error'
       );
     });
 
   }catch(error){
-    showBootError(error.message || '認証に失敗しました。');
+    showBootError(
+      error.message ||
+        '認証に失敗しました。'
+    );
   }
 }
-
 async function initLogin(){
   if(isLoggedOutLanding()){
     showLoggedOutScreen();
@@ -1156,7 +1317,7 @@ async function logout(){
   location.replace(
     location.origin +
     location.pathname +
-    '?mode=player&v=10.6&loggedOut=1'
+    '?mode=player&v=10.17&loggedOut=1'
   );
 }
 
