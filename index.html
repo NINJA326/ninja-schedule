@@ -77,7 +77,7 @@
         <div>
           <h1>NINJA AIRS 練習予定表</h1>
           <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.11-absence-reason-required</div>
+          <div class="build">build v10.12-fast-detail-open</div>
         </div>
         <button id="logoutBtn" class="btn" type="button">退出</button>
       </header>
@@ -859,43 +859,115 @@ function bindAttendanceButtons(){
     };
   }
 }
+
+function renderEventDetail(event){
+  if(!event) return;
+
+  const time = event.allDay
+    ? '終日'
+    : [event.startTime,event.endTime].filter(Boolean).join('〜') || '時間未設定';
+
+  $('detailBody').innerHTML = `
+    <dl class="detail">
+      <dt>カテゴリー</dt><dd>${escapeHtml(eventCategories(event).join(' / '))}</dd>
+      <dt>種類</dt><dd>${escapeHtml(event.type || '')}</dd>
+      <dt>日付</dt><dd>${escapeHtml(event.date || '')}</dd>
+      <dt>時間</dt><dd>${escapeHtml(time)}</dd>
+      <dt>予定名</dt><dd>${escapeHtml(event.title || '')}</dd>
+      <dt>会場</dt><dd>${escapeHtml(event.place || event.location || '')}</dd>
+      <dt>詳細</dt><dd>${escapeHtml(event.detail || event.note || '')}</dd>
+    </dl>
+    ${attendanceHtml(event)}
+  `;
+
+  bindAttendanceButtons();
+}
+
 async function openEvent(scheduleId){
-  try{
-    const payload = await api(
-      'schedule.getById',
-      {token:state.token,scheduleId},
-      30000
+  const id = String(scheduleId || '').trim();
+
+  if(!id) return;
+
+  /*
+   * 月間予定データはすでにstate.eventsへ入っているため、
+   * まずローカルデータで詳細を即表示します。
+   * GASのschedule.getByIdを待ってからモーダルを開かないため、
+   * タップ直後に反応します。
+   */
+  const localEvent =
+    state.events.find(
+      event => String(event.scheduleId || '') === id
+    ) || null;
+
+  state.currentAttendance = null;
+
+  if(localEvent){
+    state.currentEvent = localEvent;
+
+    renderEventDetail(
+      localEvent
     );
-
-    const event = payload.schedule || payload.event || payload.item || payload;
-    state.currentEvent = event;
-    state.currentAttendance = null;
-
-    const time = event.allDay
-      ? '終日'
-      : [event.startTime,event.endTime].filter(Boolean).join('〜') || '時間未設定';
-
-    $('detailBody').innerHTML = `
-      <dl class="detail">
-        <dt>カテゴリー</dt><dd>${escapeHtml(eventCategories(event).join(' / '))}</dd>
-        <dt>種類</dt><dd>${escapeHtml(event.type || '')}</dd>
-        <dt>日付</dt><dd>${escapeHtml(event.date || '')}</dd>
-        <dt>時間</dt><dd>${escapeHtml(time)}</dd>
-        <dt>予定名</dt><dd>${escapeHtml(event.title || '')}</dd>
-        <dt>会場</dt><dd>${escapeHtml(event.place || event.location || '')}</dd>
-        <dt>詳細</dt><dd>${escapeHtml(event.detail || event.note || '')}</dd>
-      </dl>
-      ${attendanceHtml(event)}
-    `;
-
-    bindAttendanceButtons();
-    loadCurrentAttendance();
 
     $('detailModal').classList.add('open');
     $('detailModal').setAttribute('aria-hidden','false');
 
+    // 出欠回答だけは裏で最新状態を取得。
+    loadCurrentAttendance();
+  }else{
+    // ローカルに無い場合だけ読み込み表示を先に出す。
+    $('detailBody').innerHTML =
+      '<div class="status">予定詳細を読み込んでいます…</div>';
+
+    $('detailModal').classList.add('open');
+    $('detailModal').setAttribute('aria-hidden','false');
+  }
+
+  /*
+   * サーバーから最新詳細を裏で取得して差し替えます。
+   * 通信が遅くても、モーダル表示そのものは待ちません。
+   */
+  try{
+    const payload = await api(
+      'schedule.getById',
+      {
+        token:state.token,
+        scheduleId:id
+      },
+      30000
+    );
+
+    const event =
+      payload.schedule ||
+      payload.event ||
+      payload.item ||
+      payload;
+
+    // 開いている途中で別予定へ移動していたら古い結果を書き込まない。
+    if(
+      state.currentEvent &&
+      String(state.currentEvent.scheduleId || '') !== id
+    ){
+      return;
+    }
+
+    state.currentEvent = event;
+
+    renderEventDetail(
+      event
+    );
+
+    // サーバー最新詳細へ差し替え後も回答状態を反映。
+    loadCurrentAttendance();
+
   }catch(error){
-    showStatus($('appStatus'),error.message,'error');
+    /*
+     * ローカル詳細を既に表示できている場合は、
+     * 通信失敗で画面を閉じない。
+     */
+    if(!localEvent){
+      $('detailBody').innerHTML =
+        `<div class="status error">${escapeHtml(error?.message || '予定詳細を読み込めませんでした。')}</div>`;
+    }
   }
 }
 function closeModal(){
