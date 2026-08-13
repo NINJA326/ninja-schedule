@@ -22,17 +22,18 @@
     .status{min-height:20px;font-size:12px;line-height:1.5;color:var(--muted)}.status.error{color:#fecaca}.status.ok{color:#bbf7d0}
     .btn{min-height:40px;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);font-weight:800;cursor:pointer}
     .btn.primary{background:var(--primary);border-color:var(--primary)}.btn.danger{background:var(--danger);border-color:var(--danger)}
-    .app{width:min(1180px,100%);margin:auto;display:flex;flex-direction:column;gap:8px}
-    .topbar{display:flex;justify-content:space-between;gap:8px;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
-    .topbar h1{margin:0;font-size:18px}.player{margin-top:4px;color:#bfdbfe;font-size:12px}.build{margin-top:3px;color:#64748b;font-size:10px}
-    .toolbar{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center}
-    .nav{display:flex;gap:5px}.month-title{margin:0;text-align:center;font-size:20px}
-    select{min-height:40px;max-width:150px;padding:7px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);font-weight:700}
-    .calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:30px repeat(6,minmax(96px,1fr));border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel)}
-    .dow{display:grid;place-items:center;border-right:1px solid var(--line);background:#0a1627;font-size:12px;font-weight:900}.dow:nth-child(7){border-right:0}.sun{color:#fca5a5}.sat{color:#93c5fd}
-    .day{min-width:0;padding:3px;border-top:1px solid var(--line);border-right:1px solid var(--line);overflow:hidden}.day:nth-child(7n){border-right:0}.day.out{opacity:.32}.day.today{box-shadow:inset 0 0 0 2px #60a5fa}
-    .day-number{display:block;margin-bottom:2px;font-size:11px;font-weight:900}
-    .event{display:block;width:100%;margin:2px 0;padding:3px 4px;border:0;border-radius:5px;color:#fff;text-align:left;font-size:9px;font-weight:800;line-height:1.2;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;touch-action:manipulation}
+    .app{width:min(1180px,100%);height:100%;margin:auto;display:flex;flex-direction:column;gap:4px;min-height:0}
+    .toolbar{display:grid;grid-template-columns:32px 44px minmax(86px,1fr) minmax(96px,124px) 32px 46px;gap:4px;align-items:center;flex:0 0 auto}
+    .month-title{margin:0;text-align:center;font-size:16px;white-space:nowrap}
+    select{min-height:34px;min-width:0;max-width:none;padding:5px 6px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--text);font-size:12px;font-weight:700}
+    .toolbar .btn{min-height:34px;padding:5px 7px;border-radius:8px;font-size:12px}
+    .logout-compact{min-width:46px;padding-inline:6px!important}
+    .app-status{display:none!important}
+    .calendar{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:24px repeat(6,minmax(0,1fr));border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+    .dow{display:grid;place-items:center;border-right:1px solid var(--line);background:#0a1627;font-size:11px;font-weight:900}.dow:nth-child(7){border-right:0}.sun{color:#fca5a5}.sat{color:#93c5fd}
+    .day{min-width:0;min-height:0;padding:2px;border-top:1px solid var(--line);border-right:1px solid var(--line);overflow:hidden}.day:nth-child(7n){border-right:0}.day.out{opacity:.32}.day.today{box-shadow:inset 0 0 0 2px #60a5fa}
+    .day-number{display:block;margin-bottom:1px;font-size:10px;font-weight:900}
+    .event{display:block;width:100%;margin:1px 0;padding:2px 3px;border:0;border-radius:4px;color:#fff;text-align:left;font-size:8.5px;font-weight:800;line-height:1.15;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;touch-action:manipulation}
     .event:active{transform:scale(.98);opacity:.82}
     .more-events{display:block;width:100%;margin:2px 0;padding:2px 3px;border:1px solid var(--line);border-radius:5px;background:#0b1930;color:#bfdbfe;text-align:center;font-size:9px;font-weight:900;cursor:pointer;touch-action:manipulation}
     .day-event-list{display:grid;gap:8px}
@@ -62,7 +63,18 @@
     .attendance-reason-form label{display:block;margin-bottom:6px;font-size:13px;font-weight:900}
     .attendance-reason-form textarea{width:100%;min-height:88px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);resize:vertical}
     .attendance-reason-form .btn{width:100%;margin-top:8px}
-    @media(max-width:760px){.month-title{font-size:18px}.calendar{grid-template-rows:28px repeat(6,minmax(102px,1fr))}.event{font-size:8.5px;padding:3px}.more-events{font-size:8.5px}.topbar{border-radius:0}}
+    @media(max-width:760px){
+      html,body{height:100%;overflow:hidden}
+      .screen{height:100dvh;min-height:0;padding:calc(3px + env(safe-area-inset-top)) 4px calc(3px + env(safe-area-inset-bottom));overflow:hidden}
+      .app{height:100%;min-height:0}
+      .toolbar{grid-template-columns:30px 42px minmax(82px,1fr) minmax(92px,112px) 30px 44px;gap:3px}
+      .month-title{font-size:14px}
+      .toolbar .btn{min-height:31px;padding:4px 5px;font-size:11px}
+      select{min-height:31px;padding:4px;font-size:11px}
+      .calendar{grid-template-rows:22px repeat(6,minmax(0,1fr));border-radius:8px}
+      .event{font-size:8px;padding:2px 3px}
+      .more-events{font-size:8px;padding:1px 2px;margin:1px 0}
+    }
   </style>
   <script src="./config.js?v=10.1.0"></script>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -80,36 +92,24 @@
 
   <main id="appView" class="screen hidden">
     <div class="app">
-      <header class="topbar">
-        <div>
-          <h1>NINJA AIRS 練習予定表</h1>
-          <div id="playerInfo" class="player"></div>
-          <div class="build">build v10.17-line-auth-recovery</div>
-        </div>
-        <button id="logoutBtn" class="btn" type="button">退出</button>
-      </header>
-
       <section class="toolbar">
-        <div class="nav">
-          <button id="prevBtn" class="btn" type="button">‹</button>
-          <button id="todayBtn" class="btn" type="button">今日</button>
-        </div>
+        <button id="prevBtn" class="btn" type="button" aria-label="前の月">‹</button>
+        <button id="todayBtn" class="btn" type="button">今日</button>
         <h2 id="monthTitle" class="month-title">--</h2>
-        <div class="nav">
-          <select id="categoryFilter">
-            <option value="ALL">全カテゴリー</option>
-            <option value="男子U13">男子U13</option>
-            <option value="男子U14">男子U14</option>
-            <option value="男子U15">男子U15</option>
-            <option value="女子U13">女子U13</option>
-            <option value="女子U14">女子U14</option>
-            <option value="女子U15">女子U15</option>
-          </select>
-          <button id="nextBtn" class="btn" type="button">›</button>
-        </div>
+        <select id="categoryFilter" aria-label="カテゴリー">
+          <option value="ALL">全カテゴリー</option>
+          <option value="男子U13">男子U13</option>
+          <option value="男子U14">男子U14</option>
+          <option value="男子U15">男子U15</option>
+          <option value="女子U13">女子U13</option>
+          <option value="女子U14">女子U14</option>
+          <option value="女子U15">女子U15</option>
+        </select>
+        <button id="nextBtn" class="btn" type="button" aria-label="次の月">›</button>
+        <button id="logoutBtn" class="btn logout-compact" type="button">退出</button>
       </section>
 
-      <div id="appStatus" class="status"></div>
+      <div id="appStatus" class="status app-status"></div>
       <section id="calendar" class="calendar"></section>
     </div>
   </main>
@@ -275,13 +275,6 @@ function hasValidSession(){
 function showApp(){
   $('bootView').classList.add('hidden');
   $('appView').classList.remove('hidden');
-
-  const playerCategory = String(state.player?.category || '').trim();
-
-  $('playerInfo').textContent =
-    (state.player?.playerName || state.player?.name || '選手') +
-    ' / ' +
-    playerCategory;
 
   state.category = 'ALL';
 
