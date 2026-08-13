@@ -142,7 +142,7 @@ const CONFIG = Object.freeze({
 });
 
 const MONTH_CACHE_CONFIG = Object.freeze({
-  MAX_AGE_MS: 6 * 60 * 60 * 1000
+  MAX_AGE_MS: 7 * 24 * 60 * 60 * 1000
 });
 
 function persistentMonthCacheKey(month){
@@ -238,6 +238,7 @@ const state = {
   events: [],
   allEvents: [],
   monthEventCache: new Map(),
+  monthRequests: new Map(),
   loadedAllMonth: '',
   category: 'ALL',
   currentEvent: null,
@@ -259,6 +260,14 @@ function readJson(key){
 }
 
 function showStatus(node,message,type=''){
+  if(!node) return;
+
+  if(node.id === 'appStatus'){
+    node.textContent = '';
+    node.className = 'status app-status';
+    return;
+  }
+
   node.textContent = message || '';
   node.className = 'status' + (type ? ' ' + type : '');
 }
@@ -348,6 +357,7 @@ function clearSession(){
   state.allEvents = [];
   state.loadedAllMonth = '';
   state.monthEventCache.clear();
+  state.monthRequests.clear();
   clearPersistentMonthCache();
   localStorage.removeItem(CONFIG.TOKEN_KEY);
   localStorage.removeItem(CONFIG.PLAYER_KEY);
@@ -734,8 +744,11 @@ function applyCategoryFilter(){
   });
 }
 
-async function fetchAllCategoriesMonth(month){
-  if(state.monthEventCache.has(month)){
+async function fetchAllCategoriesMonth(month,{force=false}={}){
+  if(
+    !force &&
+    state.monthEventCache.has(month)
+  ){
     const cached =
       state.monthEventCache.get(month);
 
@@ -746,180 +759,212 @@ async function fetchAllCategoriesMonth(month){
 
     state.loadedAllMonth = month;
 
-    return;
+    return state.allEvents;
   }
 
-  const [year,monthNumber] = month.split('-').map(Number);
+  if(state.monthRequests.has(month)){
+    return state.monthRequests.get(month);
+  }
 
-  const categories = [
-    '男子U13','男子U14','男子U15',
-    '女子U13','女子U14','女子U15'
-  ];
+  const [year,monthNumber] =
+    month.split('-').map(Number);
 
-  const results = await Promise.all(
-    categories.map(category =>
-      api(
-        'schedule.getByMonth',
-        {
-          token:state.token,
-          year,
-          month:monthNumber,
-          category
-        },
-        30000
-      )
-    )
+  const request = (async()=>{
+    /*
+     * schedule.getByMonth はGAS側ですでに
+     * その月の全カテゴリー予定を返します。
+     * カテゴリーごとの6通信は行いません。
+     */
+    const payload = await api(
+      'schedule.getByMonth',
+      {
+        token:state.token,
+        year,
+        month:monthNumber
+      },
+      30000
+    );
+
+    const events =
+      normalizeEventList(payload)
+        .slice()
+        .sort((a,b)=>
+          String(a.date || '').localeCompare(
+            String(b.date || '')
+          ) ||
+          String(a.startTime || '').localeCompare(
+            String(b.startTime || '')
+          )
+        );
+
+    state.monthEventCache.set(
+      month,
+      events.slice()
+    );
+
+    savePersistentMonthCache(
+      month,
+      events.slice()
+    );
+
+    return events;
+  })();
+
+  state.monthRequests.set(
+    month,
+    request
   );
 
-  const merged = [];
-  const seen = new Set();
+  try{
+    return await request;
+  }finally{
+    state.monthRequests.delete(month);
+  }
+}
+function hydratePersistentMonth(month){
+  if(state.monthEventCache.has(month)){
+    return true;
+  }
 
-  results.forEach(payload=>{
-    normalizeEventList(payload).forEach(event=>{
-      const key =
-        String(
-          event.scheduleId || ''
-        ) ||
-        JSON.stringify(event);
+  const persisted =
+    loadPersistentMonthCache(month);
 
-      if(seen.has(key)) return;
-
-      seen.add(key);
-      merged.push(event);
-    });
-  });
-
-  state.allEvents = merged;
-  state.loadedAllMonth = month;
+  if(!persisted){
+    return false;
+  }
 
   state.monthEventCache.set(
     month,
-    merged.slice()
+    persisted.events.slice()
   );
 
-  savePersistentMonthCache(
-    month,
-    merged.slice()
+  return true;
+}
+
+function applyMonthEvents(month,events){
+  if(state.month !== month){
+    return;
+  }
+
+  state.allEvents =
+    Array.isArray(events)
+      ? events.slice()
+      : [];
+
+  state.loadedAllMonth = month;
+
+  applyCategoryFilter();
+  renderCalendar();
+}
+
+function adjacentMonthKey(month,offset){
+  const [year,monthNumber] =
+    month.split('-').map(Number);
+
+  return monthKey(
+    new Date(
+      year,
+      monthNumber - 1 + offset,
+      1
+    )
   );
 }
+
+function prefetchAdjacentMonths(month){
+  [
+    adjacentMonthKey(month,-1),
+    adjacentMonthKey(month,1)
+  ].forEach(targetMonth=>{
+    if(
+      state.monthEventCache.has(targetMonth) ||
+      state.monthRequests.has(targetMonth)
+    ){
+      return;
+    }
+
+    if(hydratePersistentMonth(targetMonth)){
+      return;
+    }
+
+    setTimeout(()=>{
+      fetchAllCategoriesMonth(
+        targetMonth,
+        {
+          force:true
+        }
+      ).catch(()=>{});
+    },0);
+  });
+}
+
 async function loadMonth(month){
   state.month = month;
 
   /*
-   * 1. メモリキャッシュがあれば即表示
-   * 2. 無ければlocalStorageから即復元
-   * 3. 表示後にバックグラウンドで最新版を取得
+   * 保存済みデータがある場合は通信を一切待たずに即表示します。
+   * 「読み込み中」「○月を読み込みました」は表示しません。
    */
+  const hasCache =
+    hydratePersistentMonth(month);
 
-  if(!state.monthEventCache.has(month)){
-    const persisted =
-      loadPersistentMonthCache(month);
-
-    if(persisted){
-      state.monthEventCache.set(
-        month,
-        persisted.events.slice()
-      );
-    }
-  }
-
-  if(state.monthEventCache.has(month)){
-    state.allEvents =
-      state.monthEventCache
-        .get(month)
-        .slice();
-
-    state.loadedAllMonth = month;
-
-    applyCategoryFilter();
-    renderCalendar();
+  if(hasCache){
+    applyMonthEvents(
+      month,
+      state.monthEventCache.get(month)
+    );
 
     /*
-     * 読み込み中表示は出さず、
-     * 裏で最新版へ静かに更新します。
+     * 最新化は完全にバックグラウンド。
+     * 表示月が移動していた場合、古い月の通信結果で
+     * 現在画面を上書きしません。
      */
-    setTimeout(()=>{
-      refreshMonthInBackground(month)
-        .catch(()=>{});
+    setTimeout(async()=>{
+      try{
+        const fresh =
+          await fetchAllCategoriesMonth(
+            month,
+            {
+              force:true
+            }
+          );
+
+        applyMonthEvents(
+          month,
+          fresh
+        );
+
+        prefetchAdjacentMonths(
+          month
+        );
+      }catch(error){}
     },0);
 
     return;
   }
 
   /*
-   * 初回端末・初回月だけはデータが無いため通信が必要です。
-   * ただし「読み込み中…」は表示しません。
+   * この端末で一度も取得していない月だけ通信します。
+   * 1通信だけなので従来の6通信より大幅に短縮されます。
+   * 通信状態の文言は画面に表示しません。
    */
   renderCalendar();
 
-  await fetchAllCategoriesMonth(month);
+  const fresh =
+    await fetchAllCategoriesMonth(
+      month,
+      {
+        force:true
+      }
+    );
 
-  applyCategoryFilter();
-  renderCalendar();
-}
-
-async function refreshMonthInBackground(month){
-  const [year,monthNumber] =
-    month.split('-').map(Number);
-
-  const categories = [
-    '男子U13','男子U14','男子U15',
-    '女子U13','女子U14','女子U15'
-  ];
-
-  const results = await Promise.all(
-    categories.map(category =>
-      api(
-        'schedule.getByMonth',
-        {
-          token:state.token,
-          year,
-          month:monthNumber,
-          category
-        },
-        30000
-      )
-    )
-  );
-
-  const merged = [];
-  const seen = new Set();
-
-  results.forEach(payload=>{
-    normalizeEventList(payload)
-      .forEach(event=>{
-        const key =
-          String(
-            event.scheduleId || ''
-          ) ||
-          JSON.stringify(event);
-
-        if(seen.has(key)) return;
-
-        seen.add(key);
-        merged.push(event);
-      });
-  });
-
-  state.monthEventCache.set(
+  applyMonthEvents(
     month,
-    merged.slice()
+    fresh
   );
 
-  savePersistentMonthCache(
-    month,
-    merged.slice()
+  prefetchAdjacentMonths(
+    month
   );
-
-  if(state.month === month){
-    state.allEvents =
-      merged.slice();
-
-    state.loadedAllMonth = month;
-
-    applyCategoryFilter();
-    renderCalendar();
-  }
 }
 function filteredEvents(date){
   return state.events.filter(
